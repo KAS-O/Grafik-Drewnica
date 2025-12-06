@@ -11,8 +11,16 @@ service cloud.firestore {
         : null;
     }
 
+    function hasAdminRole(roleValue) {
+      return roleValue == "Administrator" || roleValue == "admin" || roleValue == "Admin";
+    }
+
     function isAdmin() {
-      return userRecord() != null && userRecord().exists() && userRecord().data.role == "Administrator";
+      return isSignedIn() && (
+        (request.auth.token.admin == true) ||
+        (request.auth.token.role != null && hasAdminRole(request.auth.token.role)) ||
+        (userRecord() != null && userRecord().exists() && hasAdminRole(userRecord().data.role))
+      );
     }
 
     function isSelf(userId) {
