@@ -20,9 +20,14 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  const normalizeRole = (rawRole, hasAdminClaim = false) => {
+  const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+
+  const normalizeRole = (rawRole, hasAdminPrivilege = false) => {
     const value = (rawRole || "").trim().toLowerCase();
-    if (hasAdminClaim) return "Administrator";
+    if (hasAdminPrivilege) return "Administrator";
     if (value === "administrator" || value === "admin") return "Administrator";
     return "Użytkownik";
   };
@@ -48,10 +53,11 @@ export function AuthProvider({ children }) {
         const snap = await getDoc(userRef);
         const tokenResult = await getIdTokenResult(firebaseUser);
         const hasAdminClaim = tokenResult?.claims?.admin === true;
+        const isEnvAdmin = adminEmails.includes((firebaseUser.email || "").toLowerCase());
 
         if (snap.exists()) {
           const data = snap.data();
-          const normalizedRole = normalizeRole(data.role, hasAdminClaim);
+          const normalizedRole = normalizeRole(data.role, hasAdminClaim || isEnvAdmin);
           setRole(normalizedRole);
           setIsAdmin(normalizedRole === "Administrator");
           setProfile({
@@ -60,8 +66,8 @@ export function AuthProvider({ children }) {
             employeeId: data.employeeId || null
           });
         } else {
-          // Domyślnie traktujemy jako zwykłego użytkownika
-          const normalizedRole = normalizeRole(null, hasAdminClaim);
+          // Domyślnie traktujemy jako zwykłego użytkownika lub administratora z listy env/custom claims
+          const normalizedRole = normalizeRole(null, hasAdminClaim || isEnvAdmin);
           setRole(normalizedRole);
           setIsAdmin(normalizedRole === "Administrator");
           setProfile({ firstName: firebaseUser.displayName || "", lastName: "", employeeId: null });

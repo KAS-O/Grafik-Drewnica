@@ -10,10 +10,7 @@ import {
   getDoc,
   getDocs,
   getFirestore,
-  query,
   setDoc,
-  updateDoc,
-  where,
   serverTimestamp
 } from "firebase/firestore";
 import { auth, app } from "../../lib/firebase";
@@ -141,13 +138,14 @@ export default function DashboardPage() {
     lastName: "",
     position: POSITIONS[0]
   });
-  const [assignmentForm, setAssignmentForm] = useState({ employeeId: "", accountEmail: "" });
   const [adminNotice, setAdminNotice] = useState({ type: "", text: "" });
   const [formPending, setFormPending] = useState(false);
   const db = useMemo(() => getFirestore(app), []);
 
   useEffect(() => {
-    if (!isAdmin) {
+    if (isAdmin) {
+      setAdminPanelOpen(true);
+    } else {
       setAdminPanelOpen(false);
     }
   }, [isAdmin]);
@@ -170,9 +168,6 @@ export default function DashboardPage() {
           const snapshot = await getDocs(collection(db, "employees"));
           const list = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
           setEmployees(list);
-          if (!assignmentForm.employeeId && list.length) {
-            setAssignmentForm((prev) => ({ ...prev, employeeId: list[0].id }));
-          }
         } else if (profile?.employeeId) {
           const employeeSnap = await getDoc(doc(db, "employees", profile.employeeId));
           if (employeeSnap.exists()) {
@@ -281,59 +276,6 @@ export default function DashboardPage() {
       setAdminNotice({ type: "error", text: "Nie udało się dodać pracownika. Sprawdź uprawnienia." });
     } finally {
       setFormPending(false);
-    }
-  };
-
-  const handleAssignAccount = async (e) => {
-    e.preventDefault();
-    if (!assignmentForm.employeeId || !assignmentForm.accountEmail) return;
-    setAdminNotice({ type: "", text: "" });
-
-    if (!isAdmin) {
-      setAdminNotice({ type: "error", text: "Tylko administrator może przypisywać konta." });
-      return;
-    }
-
-    try {
-      const userQuery = query(
-        collection(db, "users"),
-        where("email", "==", assignmentForm.accountEmail.trim().toLowerCase())
-      );
-      const userSnapshot = await getDocs(userQuery);
-
-      if (userSnapshot.empty) {
-        setAdminNotice({ type: "error", text: "Nie znaleziono konta o podanym adresie e-mail." });
-        return;
-      }
-
-      const userDoc = userSnapshot.docs[0];
-      const userId = userDoc.id;
-      const employee = employees.find((emp) => emp.id === assignmentForm.employeeId);
-
-      await updateDoc(doc(db, "users", userId), {
-        employeeId: employee?.id || null,
-        firstName: employee?.firstName || "",
-        lastName: employee?.lastName || "",
-        role: userDoc.data().role || "Użytkownik"
-      });
-
-      await updateDoc(doc(db, "employees", assignmentForm.employeeId), {
-        assignedUserId: userId,
-        assignedUserEmail: assignmentForm.accountEmail.trim().toLowerCase()
-      });
-
-      setEmployees((prev) =>
-        prev.map((emp) =>
-          emp.id === assignmentForm.employeeId
-            ? { ...emp, assignedUserId: userId, assignedUserEmail: assignmentForm.accountEmail.trim().toLowerCase() }
-            : emp
-        )
-      );
-
-      setAdminNotice({ type: "success", text: "Przypisano konto do pracownika." });
-    } catch (error) {
-      console.error("Nie udało się przypisać konta:", error);
-      setAdminNotice({ type: "error", text: "Nie udało się przypisać konta. Upewnij się, że masz uprawnienia administratora." });
     }
   };
 
@@ -547,12 +489,29 @@ export default function DashboardPage() {
                       const entry = scheduleEntries[employee.id];
                       const value = entry?.shifts?.[day.dayNumber] || "";
                       const isPersonal = personalEmployee && personalEmployee.id === employee.id;
+                      const tone =
+                        value === "D"
+                          ? "bg-amber-300/90 text-slate-950"
+                          : value === "N"
+                            ? "bg-sky-300/90 text-slate-950"
+                            : "bg-slate-900/50 text-sky-100/70";
                       return (
                         <td
                           key={`${employee.id}-day-${day.dayNumber}`}
                           className={`${getDayCellClasses(day)} text-center align-middle`}
                         >
-                          {value ? (
+                          {isAdmin ? (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleShift(employee.id, day.dayNumber)}
+                              className={`mx-auto flex h-8 w-12 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold transition hover:scale-105 focus:outline-none focus:ring-2 focus:ring-sky-300/60 ${
+                                tone
+                              } ${isPersonal ? "ring-2 ring-sky-300/60" : ""}`}
+                              title="Kliknij, aby przełączać dyżury (pusty → D → N → pusty)"
+                            >
+                              {value || "—"}
+                            </button>
+                          ) : value ? (
                             <span
                               className={`inline-flex min-w-[28px] items-center justify-center rounded-full px-2 py-1 text-[10px] font-bold ${
                                 isPersonal ? "bg-slate-900/60 ring-2 ring-sky-300/60" : "bg-slate-900/30"
@@ -575,7 +534,7 @@ export default function DashboardPage() {
         {/* Panel administratora */}
         {isAdmin && adminPanelOpen && (
           <section className="rounded-3xl border-2 border-rose-400/40 bg-gradient-to-br from-rose-950/70 via-slate-950 to-slate-950 p-5 md:p-6 shadow-xl shadow-rose-500/20">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="mb-1 inline-flex items-center gap-2 rounded-full bg-rose-500/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-rose-100">
                   <span className="h-1.5 w-1.5 rounded-full bg-current" />
@@ -583,26 +542,80 @@ export default function DashboardPage() {
                 </div>
                 <h2 className="text-lg font-bold text-rose-50">Panel administracyjny</h2>
                 <p className="text-xs text-rose-100/80">
-                  Dodawaj pracowników, przypisuj konta i edytuj grafik w widoku poziomej tabeli.
-                  Kliknij kafelek dnia, aby przełączać pomiędzy dyżurem dziennym (D), nocnym (N) albo pustym polem.
+                  Pełny widok grafiku wszystkich osób, nowe wirtualne rekordy pracowników oraz szybkie kliknięcia w kafelki dyżurów (D/N).
                 </p>
               </div>
-              {adminNotice.text && (
-                <span
-                  className={`rounded-full border px-3 py-1 text-[11px] font-medium ${
-                    adminNotice.type === "error"
-                      ? "border-red-300/60 bg-red-500/20 text-red-50"
-                      : "border-emerald-300/60 bg-emerald-500/20 text-emerald-50"
-                  }`}
-                >
-                  {adminNotice.text}
+              <div className="flex flex-col items-end gap-2 text-right">
+                {adminNotice.text && (
+                  <span
+                    className={`rounded-full border px-3 py-1 text-[11px] font-medium ${
+                      adminNotice.type === "error"
+                        ? "border-red-300/60 bg-red-500/20 text-red-50"
+                        : "border-emerald-300/60 bg-emerald-500/20 text-emerald-50"
+                    }`}
+                  >
+                    {adminNotice.text}
+                  </span>
+                )}
+                <span className="rounded-full border border-rose-300/50 bg-rose-500/15 px-3 py-1 text-[11px] font-semibold text-rose-50">
+                  Uprawnienia administratora aktywne
                 </span>
-              )}
+              </div>
             </div>
 
-            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-rose-300/40 bg-rose-950/40 p-4">
+                <h3 className="text-sm font-semibold text-rose-50">Uprawnienia administratora</h3>
+                <ul className="mt-3 space-y-2 text-xs text-rose-100/80">
+                  <li className="flex items-start gap-2">
+                    <span className="mt-[3px] inline-block h-2 w-2 rounded-full bg-rose-300" />
+                    Dodajesz wirtualnych pracowników (imię, nazwisko, stanowisko) bez zakładania kont w Firebase.
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-[3px] inline-block h-2 w-2 rounded-full bg-rose-300" />
+                    Widzisz pełny grafik wszystkich osób i możesz go swobodnie edytować.
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-[3px] inline-block h-2 w-2 rounded-full bg-rose-300" />
+                    Klikasz kafelek dnia, aby przełączać kolejno: pusty → D (dyżur dzienny) → N (dyżur nocny).
+                  </li>
+                </ul>
+                <p className="mt-3 rounded-xl border border-rose-300/30 bg-rose-950/60 px-3 py-2 text-[11px] text-rose-100/70">
+                  Podczas tworzenia grafiku nie tworzysz kont. W razie potrzeby konta użytkowników możesz przygotować osobno w kolekcji <code className="rounded bg-slate-900/60 px-1">users</code>.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-rose-300/40 bg-rose-950/40 p-4">
+                <h3 className="text-sm font-semibold text-rose-50">Legenda dyżurów i nawigacja</h3>
+                <div className="mt-3 grid gap-2 text-[11px] text-rose-100/80">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-7 min-w-[44px] items-center justify-center rounded-md bg-amber-300/80 px-2 text-sm font-bold text-amber-950">D</span>
+                    Dyżur dzienny
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-7 min-w-[44px] items-center justify-center rounded-md bg-sky-300/80 px-2 text-sm font-bold text-slate-950">N</span>
+                    Dyżur nocny
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-7 min-w-[44px] items-center justify-center rounded-md border border-rose-200/40 bg-slate-950/50 px-2 text-sm font-semibold text-rose-100/70">—</span>
+                    Puste pole (brak dyżuru)
+                  </div>
+                  <p className="mt-2 rounded-lg border border-rose-300/30 bg-rose-900/40 px-3 py-2 text-xs">
+                    Edytuj grafik w tabeli poniżej lub klikaj kafelki w głównym widoku grafiku. Zapisz zmiany przyciskiem „Zapisz grafik”.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
               <form onSubmit={handleAddEmployee} className="rounded-2xl border border-rose-300/40 bg-rose-950/40 p-4">
-                <h3 className="text-sm font-semibold text-rose-50">Dodaj pracownika</h3>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-rose-50">Dodaj pracownika</h3>
+                    <p className="text-[11px] text-rose-100/70">Imię, nazwisko i stanowisko — bez zakładania konta.</p>
+                  </div>
+                  <span className="rounded-full bg-rose-500/20 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-rose-100">Formularz wirtualnych danych</span>
+                </div>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   <label className="text-xs text-rose-100/80">
                     Imię
@@ -610,6 +623,7 @@ export default function DashboardPage() {
                       value={employeeForm.firstName}
                       onChange={(e) => setEmployeeForm((prev) => ({ ...prev, firstName: e.target.value }))}
                       className="mt-1 w-full rounded-xl border border-rose-200/40 bg-slate-950/60 px-3 py-2 text-sm text-rose-50 focus:border-rose-200 focus:ring-2 focus:ring-rose-400/60"
+                      placeholder="np. Jan"
                       required
                     />
                   </label>
@@ -619,6 +633,7 @@ export default function DashboardPage() {
                       value={employeeForm.lastName}
                       onChange={(e) => setEmployeeForm((prev) => ({ ...prev, lastName: e.target.value }))}
                       className="mt-1 w-full rounded-xl border border-rose-200/40 bg-slate-950/60 px-3 py-2 text-sm text-rose-50 focus:border-rose-200 focus:ring-2 focus:ring-rose-400/60"
+                      placeholder="np. Kowalska"
                       required
                     />
                   </label>
@@ -646,103 +661,69 @@ export default function DashboardPage() {
                 </button>
               </form>
 
-              <form onSubmit={handleAssignAccount} className="rounded-2xl border border-rose-300/40 bg-rose-950/40 p-4">
-                <h3 className="text-sm font-semibold text-rose-50">Przypisz konto do pracownika</h3>
-                <div className="mt-3 grid gap-3">
-                  <label className="text-xs text-rose-100/80">
-                    Pracownik
-                    <select
-                      value={assignmentForm.employeeId}
-                      onChange={(e) => setAssignmentForm((prev) => ({ ...prev, employeeId: e.target.value }))}
-                      className="mt-1 w-full rounded-xl border border-rose-200/40 bg-slate-950/60 px-3 py-2 text-sm text-rose-50 focus:border-rose-200 focus:ring-2 focus:ring-rose-400/60"
-                      required
-                    >
-                      <option value="">Wybierz pracownika</option>
-                      {employees.map((emp) => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.firstName} {emp.lastName} ({emp.position})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="text-xs text-rose-100/80">
-                    Email konta (Firebase)
-                    <input
-                      type="email"
-                      value={assignmentForm.accountEmail}
-                      onChange={(e) => setAssignmentForm((prev) => ({ ...prev, accountEmail: e.target.value }))}
-                      className="mt-1 w-full rounded-xl border border-rose-200/40 bg-slate-950/60 px-3 py-2 text-sm text-rose-50 focus:border-rose-200 focus:ring-2 focus:ring-rose-400/60"
-                      placeholder="np. jan.kowalski@drewnica.pl"
-                      required
-                    />
-                  </label>
+              <div className="rounded-2xl border border-rose-300/40 bg-rose-950/40 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-rose-50">Lista pracowników</h3>
+                  <span className="rounded-full bg-rose-500/20 px-3 py-1 text-[11px] font-medium text-rose-100">
+                    {employees.length} osób
+                  </span>
                 </div>
-                <button
-                  type="submit"
-                  className="mt-4 w-full rounded-xl bg-gradient-to-r from-amber-400 via-rose-400 to-sky-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110"
-                >
-                  Przypisz konto
-                </button>
-              </form>
-            </div>
 
-            <div className="mt-6 rounded-2xl border border-rose-300/40 bg-rose-950/30 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-rose-50">Lista pracowników</h3>
-                <span className="rounded-full bg-rose-500/20 px-3 py-1 text-[11px] font-medium text-rose-100">
-                  {employees.length} osób
-                </span>
-              </div>
-
-              {employees.length === 0 ? (
-                <p className="mt-3 text-xs text-rose-100/70">
-                  Brak pracowników w bazie. Dodaj pierwszą osobę, aby rozpocząć układanie grafiku.
-                </p>
-              ) : (
-                <ul className="mt-3 divide-y divide-rose-200/20">
-                  {employees.map((employee) => (
-                    <li key={`employee-${employee.id}`} className="flex flex-col gap-1 py-2 text-sm text-rose-50 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <div className="font-semibold">
-                          {employee.firstName} {employee.lastName}
+                {employees.length === 0 ? (
+                  <p className="mt-3 text-xs text-rose-100/70">
+                    Brak pracowników w bazie. Dodaj pierwszą osobę, aby rozpocząć układanie grafiku.
+                  </p>
+                ) : (
+                  <ul className="mt-3 divide-y divide-rose-200/20">
+                    {employees.map((employee) => (
+                      <li
+                        key={`employee-${employee.id}`}
+                        className="flex flex-col gap-1 py-2 text-sm text-rose-50 md:flex-row md:items-center md:justify-between"
+                      >
+                        <div>
+                          <div className="font-semibold">
+                            {employee.firstName} {employee.lastName}
+                          </div>
+                          <div className="text-[11px] uppercase tracking-wide text-rose-100/70">{employee.position}</div>
                         </div>
-                        <div className="text-[11px] uppercase tracking-wide text-rose-100/70">{employee.position}</div>
-                      </div>
-                      <div className="text-[11px] text-rose-100/80">
-                        {employee.assignedUserEmail ? (
-                          <span className="rounded-full bg-emerald-500/20 px-3 py-1 font-semibold text-emerald-100">
-                            Konto: {employee.assignedUserEmail}
-                          </span>
-                        ) : (
-                          <span className="rounded-full bg-amber-500/20 px-3 py-1 font-semibold text-amber-100">
-                            Bez przypisanego konta
-                          </span>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+                        <div className="text-[11px] text-rose-100/80">
+                          {employee.assignedUserEmail ? (
+                            <span className="rounded-full bg-emerald-500/20 px-3 py-1 font-semibold text-emerald-100">
+                              Konto: {employee.assignedUserEmail}
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-amber-500/20 px-3 py-1 font-semibold text-amber-100">
+                              Bez przypisanego konta
+                            </span>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
 
             <div className="mt-6 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-1">
                   <h3 className="text-sm font-semibold text-rose-50">Tabela edycji grafiku (poziomo)</h3>
+                  <p className="text-[11px] text-rose-100/70">Kliknij dowolny kafelek, aby przełączać D/N i zapisuj zmiany jednym przyciskiem.</p>
+                </div>
+                <div className="flex items-center gap-2">
                   {scheduleDirty && (
                     <span className="rounded-full border border-amber-300/60 bg-amber-500/20 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-50">
                       Niezapisane zmiany
                     </span>
                   )}
+                  <button
+                    onClick={handleSaveSchedule}
+                    disabled={scheduleSaving || !scheduleDirty}
+                    className="rounded-xl bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {scheduleSaving ? "Zapisywanie..." : scheduleDirty ? "Zapisz grafik" : "Brak zmian"}
+                  </button>
                 </div>
-                <button
-                  onClick={handleSaveSchedule}
-                  disabled={scheduleSaving || !scheduleDirty}
-                  className="rounded-xl bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {scheduleSaving ? "Zapisywanie..." : scheduleDirty ? "Zapisz grafik" : "Brak zmian"}
-                </button>
               </div>
 
               <div className="overflow-auto rounded-2xl border border-rose-300/40">
