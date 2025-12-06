@@ -87,6 +87,33 @@ function buildDays(date) {
   });
 }
 
+function groupDaysByWeek(days) {
+  const weeks = [];
+  let currentWeek = [];
+
+  days.forEach((day) => {
+    const isoDay = day.weekday === 0 ? 7 : day.weekday;
+
+    if (isoDay === 1 && currentWeek.length) {
+      weeks.push(currentWeek);
+      currentWeek = [];
+    }
+
+    currentWeek.push({ ...day, isoDay });
+
+    if (isoDay === 7) {
+      weeks.push(currentWeek);
+      currentWeek = [];
+    }
+  });
+
+  if (currentWeek.length) {
+    weeks.push(currentWeek);
+  }
+
+  return weeks;
+}
+
 function mergeEntriesWithEmployees(entries, employees) {
   const next = { ...entries };
 
@@ -131,6 +158,7 @@ export default function DashboardPage() {
   const isAdmin = role === "Administrator";
   const monthId = useMemo(() => getMonthKey(currentMonth), [currentMonth]);
   const days = useMemo(() => buildDays(currentMonth), [currentMonth]);
+  const weeks = useMemo(() => groupDaysByWeek(days), [days]);
 
   useEffect(() => {
     if (!user) return;
@@ -424,9 +452,9 @@ export default function DashboardPage() {
         <section className="glass-panel rounded-3xl p-5 md:p-6">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Grafik miesięczny</h2>
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Grafik tygodniowy</h2>
               <p className="text-xs text-sky-100/80">
-                Kolorystyka: jasny niebieski — zwykły dzień, zielony — sobota, czerwony — niedziela/święto.
+                Każda karta obejmuje poniedziałek-niedzielę, kolory odzwierciedlają typ dnia.
               </p>
             </div>
             <span className="rounded-full bg-sky-400/10 px-3 py-1 text-[11px] font-medium text-sky-200">
@@ -434,46 +462,73 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {days.map((day) => {
-              const shiftsForDay = visibleEmployees
-                .map((employee) => {
-                  const entry = scheduleEntries[employee.id];
-                  const shift = entry?.shifts?.[day.dayNumber];
-                  return shift ? `${entry.fullName}: ${shift}` : null;
-                })
-                .filter(Boolean);
-
-              const personalShift = personalEmployee
-                ? scheduleEntries[personalEmployee.id]?.shifts?.[day.dayNumber]
-                : null;
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {weeks.map((weekDays, index) => {
+              const firstDay = weekDays[0]?.dayNumber;
+              const lastDay = weekDays[weekDays.length - 1]?.dayNumber;
+              const label = `Tydzień ${firstDay}-${lastDay}`;
 
               return (
                 <div
-                  key={day.dayNumber}
-                  className={`${day.tone} rounded-2xl border p-4 shadow-sm transition hover:shadow-lg`}
+                  key={`${label}-${index}`}
+                  className="rounded-2xl border border-sky-200/30 bg-slate-950/40 p-4 shadow-sm transition hover:shadow-lg"
                 >
-                  <div className="flex items-baseline justify-between">
+                  <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold">{day.label}</p>
-                      <p className="text-xs text-slate-700">Dzień {day.dayNumber}</p>
+                      <p className="text-sm font-semibold text-sky-50">{label}</p>
+                      <p className="text-[11px] text-sky-100/70">Poniedziałek - Niedziela</p>
                     </div>
-                    {personalShift && (
-                      <span className="rounded-full bg-slate-900/10 px-2 py-1 text-[11px] font-semibold text-slate-800">
-                        {personalShift}
+                    {personalEmployee && (
+                      <span className="rounded-full bg-sky-400/10 px-3 py-1 text-[11px] font-semibold text-sky-50">
+                        Twoje dyżury
                       </span>
                     )}
                   </div>
-                  <div className="mt-3 space-y-1 text-xs text-slate-800">
-                    {shiftsForDay.length > 0 ? (
-                      shiftsForDay.map((shift) => (
-                        <p key={shift} className="font-medium">
-                          {shift}
-                        </p>
-                      ))
-                    ) : (
-                      <p className="text-slate-600">Brak zaplanowanego dyżuru.</p>
-                    )}
+
+                  <div className="mt-3 space-y-2">
+                    {weekDays.map((day) => {
+                      const shiftsForDay = visibleEmployees
+                        .map((employee) => {
+                          const entry = scheduleEntries[employee.id];
+                          const shift = entry?.shifts?.[day.dayNumber];
+                          return shift ? `${entry.fullName}: ${shift}` : null;
+                        })
+                        .filter(Boolean);
+
+                      const personalShift = personalEmployee
+                        ? scheduleEntries[personalEmployee.id]?.shifts?.[day.dayNumber]
+                        : null;
+
+                      return (
+                        <div
+                          key={`${label}-${day.dayNumber}`}
+                          className={`${day.tone} rounded-xl border px-3 py-2`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-[13px] font-semibold">{day.label}</p>
+                              <p className="text-[11px] text-slate-700">Dzień {day.dayNumber}</p>
+                            </div>
+                            {personalShift && (
+                              <span className="rounded-full bg-slate-900/10 px-2 py-1 text-[11px] font-semibold text-slate-800">
+                                {personalShift}
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-2 space-y-1 text-[11px] text-slate-800">
+                            {shiftsForDay.length > 0 ? (
+                              shiftsForDay.map((shift) => (
+                                <p key={`${shift}-${day.dayNumber}`} className="font-semibold">
+                                  {shift}
+                                </p>
+                              ))
+                            ) : (
+                              <p className="text-slate-600">Brak zaplanowanego dyżuru.</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -601,11 +656,16 @@ export default function DashboardPage() {
                   <thead className="bg-slate-900/60">
                     <tr>
                       <th className="px-4 py-3 text-left font-semibold">Pracownik</th>
-                      {days.map((day) => (
-                        <th key={day.dayNumber} className="px-2 py-3 text-center font-semibold">
-                          {day.dayNumber}
-                        </th>
-                      ))}
+                      {weeks.map((weekDays, index) => {
+                        const firstDay = weekDays[0]?.dayNumber;
+                        const lastDay = weekDays[weekDays.length - 1]?.dayNumber;
+                        return (
+                          <th key={`week-${index}`} className="px-3 py-3 text-left font-semibold">
+                            <div>{`Tydzień ${firstDay}-${lastDay}`}</div>
+                            <div className="text-[10px] font-normal text-sky-100/70">Pon - Nd</div>
+                          </th>
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody>
@@ -615,20 +675,32 @@ export default function DashboardPage() {
                           <div>{employee.firstName} {employee.lastName}</div>
                           <div className="text-[11px] text-sky-100/70">{employee.position}</div>
                         </td>
-                        {days.map((day) => {
+                        {weeks.map((weekDays, weekIndex) => {
                           const entry = scheduleEntries[employee.id] || { shifts: {} };
-                          const value = entry.shifts?.[day.dayNumber] || "";
                           return (
-                            <td key={`${employee.id}-${day.dayNumber}`} className="px-2 py-2 text-center">
-                              <select
-                                value={value}
-                                onChange={(e) => handleShiftChange(employee.id, day.dayNumber, e.target.value)}
-                                className="w-16 rounded-md border border-sky-200/40 bg-slate-900/60 px-2 py-1 text-[11px] text-sky-50 focus:border-sky-300 focus:ring-2 focus:ring-sky-400/50"
-                              >
-                                <option value="">-</option>
-                                <option value="D">D</option>
-                                <option value="N">N</option>
-                              </select>
+                            <td key={`${employee.id}-week-${weekIndex}`} className="px-3 py-2 align-top">
+                              <div className="grid gap-2 rounded-xl border border-sky-200/20 bg-slate-900/30 p-2">
+                                {weekDays.map((day) => {
+                                  const value = entry.shifts?.[day.dayNumber] || "";
+                                  return (
+                                    <label
+                                      key={`${employee.id}-${day.dayNumber}`}
+                                      className="flex items-center justify-between gap-2 text-[11px]"
+                                    >
+                                      <span className="text-sky-50">{day.label}</span>
+                                      <select
+                                        value={value}
+                                        onChange={(e) => handleShiftChange(employee.id, day.dayNumber, e.target.value)}
+                                        className="w-16 rounded-md border border-sky-200/40 bg-slate-900/60 px-2 py-1 text-[11px] text-sky-50 focus:border-sky-300 focus:ring-2 focus:ring-sky-400/50"
+                                      >
+                                        <option value="">-</option>
+                                        <option value="D">D</option>
+                                        <option value="N">N</option>
+                                      </select>
+                                    </label>
+                                  );
+                                })}
+                              </div>
                             </td>
                           );
                         })}
@@ -641,40 +713,6 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {/* Panel informacyjny */}
-        <section className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-          <div className="glass-panel rounded-3xl p-5 md:p-6">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Uprawnienia konta</h2>
-            <p className="mt-2 text-xs text-sky-100/80">
-              Twoja rola: <span className="font-semibold text-sky-50">{isAdmin ? "Administrator" : "Użytkownik"}</span>
-            </p>
-            {isAdmin ? (
-              <ul className="mt-3 list-disc space-y-1 pl-4 text-xs text-sky-100/80">
-                <li>Pełny dostęp do wszystkich grafików, pracowników i kont.</li>
-                <li>Możliwość dodawania, edycji i przypisywania osób do kont Firebase.</li>
-                <li>Zapisywanie grafiku miesięcznego z poziomu panelu administracyjnego.</li>
-              </ul>
-            ) : (
-              <ul className="mt-3 list-disc space-y-1 pl-4 text-xs text-sky-100/80">
-                <li>Podgląd własnych zmian w widoku miesięcznym.</li>
-                <li>Brak dostępu do cudzych grafików i panelu administracyjnego.</li>
-                <li>Pełna kontrola administratora nad nadanymi uprawnieniami.</li>
-              </ul>
-            )}
-          </div>
-
-          <div className="glass-panel rounded-3xl p-5 text-[11px] text-sky-100/80 md:text-xs">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-sky-200">Informacje o grafiku</h3>
-            <p className="mt-2">
-              Grafik i dane pracowników przechowywane są w Firebase Firestore, a pliki (np. załączniki) można chronić w Firebase Storage
-              za pomocą reguł zabezpieczeń. Użytkownik widzi wyłącznie swoje przypisania, administrator ma pełny dostęp.
-            </p>
-            <p className="mt-2">
-              W tabeli edycji wybierzesz dyżur dzienny (D) lub nocny (N) dla każdego dnia i pracownika. W widoku kafelków kolory odpowiadają dniom tygodnia
-              oraz świętom.
-            </p>
-          </div>
-        </section>
       </div>
     </main>
   );

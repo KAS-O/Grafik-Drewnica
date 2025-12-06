@@ -1,0 +1,20 @@
+Notatki administracyjne
+=======================
+
+Nadanie uprawnień administratora w Firebase Firestore:
+1. Przejdź do kolekcji **users**.
+2. Dokument musi mieć identyfikator równy UID konta z Firebase Authentication.
+3. Ustaw/uzupełnij pola:
+   - **role** (string): `"Administrator"` – ten wpis przełącza konto w tryb administratora w aplikacji.
+   - **firstName** (string, opcjonalnie): imię użytkownika.
+   - **lastName** (string, opcjonalnie): nazwisko użytkownika.
+   - **employeeId** (string, opcjonalnie): identyfikator dokumentu z kolekcji `employees`, jeśli konto ma być powiązane z pracownikiem.
+4. Pozostaw pozostałe pola bez zmian; w razie potrzeby możesz dodać `assignedUserId` i `assignedUserEmail` w dokumencie pracownika (kolekcja `employees`) dla spójności danych.
+
+Przykładowa struktura dokumentu w kolekcji `users` (JSON):
+{
+  "firstName": "Anna",
+  "lastName": "Kowalska",
+  "role": "Administrator",
+  "employeeId": "<ID_z_kolekcji_employees>"
+}
