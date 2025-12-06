@@ -11,6 +11,11 @@ service cloud.firestore {
         : null;
     }
 
+    function isSuperAdmin() {
+      // Stała lista kont nadrzędnych posiadających pełne uprawnienia administratora.
+      return isSignedIn() && request.auth.uid in ["OxYXS3Fp3keHXDoVRCrSXjQ4Te22"];
+    }
+
     function isAdminRole(roleValue) {
       return lower(roleValue).matches('^\\s*(administrator|admin)\\s*$');
     }
@@ -23,7 +28,7 @@ service cloud.firestore {
         ? record.data.role
         : "";
 
-      return isAdminRole(roleValue) || (isSignedIn() && request.auth.token.admin == true);
+      return isSuperAdmin() || isAdminRole(roleValue) || (isSignedIn() && request.auth.token.admin == true);
     }
 
     function isSelf(userId) {
