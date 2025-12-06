@@ -57,8 +57,8 @@ export default function LoginPage() {
               Grafik Drewnica
             </h1>
             <p className="mt-4 max-w-xl text-sm text-sky-100/80 md:text-base">
-              Zaloguj się, aby zobaczyć swój grafik lub zarządzać zmianami.
-              Motyw strony łączy gradient, neon i teksturę drewna — dokładnie tak, jak chciałeś.
+              Zaloguj się, aby zobaczyć grafik. Role są tylko dwie: "Użytkownik" ma podgląd,
+              a "Administrator" dodatkowo ma dostęp do prostego panelu administracji.
             </p>
           </div>
 
@@ -68,8 +68,7 @@ export default function LoginPage() {
                 Rola: <span className="text-sky-100">Użytkownik</span>
               </p>
               <p className="mt-2 text-xs md:text-sm">
-                Dostęp tylko do własnego grafiku i swoich danych.
-                Idealne dla pracowników.
+                Podgląd listy pracowników i miesięcznego grafiku.
               </p>
             </div>
             <div className="glass-panel rounded-2xl p-4">
@@ -77,8 +76,7 @@ export default function LoginPage() {
                 Rola: <span className="text-sky-100">Administrator</span>
               </p>
               <p className="mt-2 text-xs md:text-sm">
-                Pełny dostęp do wszystkich grafików, użytkowników
-                oraz ustawień systemu.
+                Dodatkowy dostęp do panelu administracji: dodawanie pracowników oraz edycja grafiku.
               </p>
             </div>
           </div>
@@ -151,10 +149,9 @@ export default function LoginPage() {
             </form>
 
             <p className="mt-4 text-[11px] leading-relaxed text-sky-100/70">
-              Konta użytkowników oraz role (<span className="font-semibold">Użytkownik</span>,
-              <span className="font-semibold"> Administrator</span>) konfigurujesz w{" "}
-              <span className="font-semibold">Firebase Console</span> w kolekcji{" "}
-              <code className="rounded bg-slate-900/60 px-1">users</code>.
+              Role są przechowywane w kolekcji <code className="rounded bg-slate-900/60 px-1">users</code>.
+              Użytkownicy to tylko konta logowania, a pracownicy są osobnymi wpisami w kolekcji
+              <code className="rounded bg-slate-900/60 px-1"> employees</code>.
             </p>
           </div>
         </section>
