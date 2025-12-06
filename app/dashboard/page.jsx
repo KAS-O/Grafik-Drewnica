@@ -120,6 +120,12 @@ function getDayCellClasses(day, isEditable = false) {
   return `${padding} bg-slate-900/40 text-sky-50 border border-sky-200/20`;
 }
 
+function cycleShiftValue(current) {
+  if (current === "D") return "N";
+  if (current === "N") return "";
+  return "D";
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { user, role, profile, loading } = useAuth();
@@ -222,10 +228,23 @@ export default function DashboardPage() {
     e.preventDefault();
     setStatusMessage("");
 
+    if (!isAdmin) {
+      setStatusMessage("Tylko administrator może dodawać pracowników.");
+      return;
+    }
+
+    const trimmedFirst = employeeForm.firstName.trim();
+    const trimmedLast = employeeForm.lastName.trim();
+
+    if (!trimmedFirst || !trimmedLast) {
+      setStatusMessage("Uzupełnij imię i nazwisko.");
+      return;
+    }
+
     try {
       const payload = {
-        firstName: employeeForm.firstName.trim(),
-        lastName: employeeForm.lastName.trim(),
+        firstName: trimmedFirst,
+        lastName: trimmedLast,
         position: employeeForm.position,
         assignedUserId: null,
         assignedUserEmail: null,
@@ -235,6 +254,7 @@ export default function DashboardPage() {
       const ref = await addDoc(collection(db, "employees"), payload);
       setEmployees((prev) => [...prev, { id: ref.id, ...payload }]);
       setEmployeeForm({ firstName: "", lastName: "", position: POSITIONS[0] });
+      setAssignmentForm((prev) => ({ ...prev, employeeId: ref.id }));
       setStatusMessage("Dodano nowego pracownika.");
     } catch (error) {
       console.error("Nie udało się dodać pracownika:", error);
@@ -290,14 +310,16 @@ export default function DashboardPage() {
     }
   };
 
-  const handleShiftChange = (employeeId, dayNumber, value) => {
+  const handleToggleShift = (employeeId, dayNumber) => {
     setScheduleEntries((prev) => {
       const current = prev[employeeId] || { shifts: {} };
+      const currentValue = current.shifts?.[dayNumber] || "";
+      const nextValue = cycleShiftValue(currentValue);
       return {
         ...prev,
         [employeeId]: {
           ...current,
-          shifts: { ...current.shifts, [dayNumber]: value }
+          shifts: { ...current.shifts, [dayNumber]: nextValue }
         }
       };
     });
@@ -526,6 +548,7 @@ export default function DashboardPage() {
                 <h2 className="text-lg font-bold text-rose-50">Panel administracyjny</h2>
                 <p className="text-xs text-rose-100/80">
                   Dodawaj pracowników, przypisuj konta i edytuj grafik w widoku poziomej tabeli.
+                  Kliknij kafelek dnia, aby przełączać pomiędzy dyżurem dziennym (D), nocnym (N) albo pustym polem.
                 </p>
               </div>
               {statusMessage && (
@@ -621,6 +644,45 @@ export default function DashboardPage() {
               </form>
             </div>
 
+            <div className="mt-6 rounded-2xl border border-rose-300/40 bg-rose-950/30 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-rose-50">Lista pracowników</h3>
+                <span className="rounded-full bg-rose-500/20 px-3 py-1 text-[11px] font-medium text-rose-100">
+                  {employees.length} osób
+                </span>
+              </div>
+
+              {employees.length === 0 ? (
+                <p className="mt-3 text-xs text-rose-100/70">
+                  Brak pracowników w bazie. Dodaj pierwszą osobę, aby rozpocząć układanie grafiku.
+                </p>
+              ) : (
+                <ul className="mt-3 divide-y divide-rose-200/20">
+                  {employees.map((employee) => (
+                    <li key={`employee-${employee.id}`} className="flex flex-col gap-1 py-2 text-sm text-rose-50 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <div className="font-semibold">
+                          {employee.firstName} {employee.lastName}
+                        </div>
+                        <div className="text-[11px] uppercase tracking-wide text-rose-100/70">{employee.position}</div>
+                      </div>
+                      <div className="text-[11px] text-rose-100/80">
+                        {employee.assignedUserEmail ? (
+                          <span className="rounded-full bg-emerald-500/20 px-3 py-1 font-semibold text-emerald-100">
+                            Konto: {employee.assignedUserEmail}
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-amber-500/20 px-3 py-1 font-semibold text-amber-100">
+                            Bez przypisanego konta
+                          </span>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
             <div className="mt-6 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h3 className="text-sm font-semibold text-rose-50">Tabela edycji grafiku (poziomo)</h3>
@@ -661,17 +723,26 @@ export default function DashboardPage() {
                         {days.map((day) => {
                           const entry = scheduleEntries[employee.id] || { shifts: {} };
                           const value = entry.shifts?.[day.dayNumber] || "";
+                          const tone =
+                            value === "D"
+                              ? "bg-amber-400/80 text-slate-950"
+                              : value === "N"
+                                ? "bg-sky-400/80 text-slate-950"
+                                : "bg-slate-900/50 text-rose-100/70";
+
                           return (
-                            <td key={`${employee.id}-edit-${day.dayNumber}`} className={`${getDayCellClasses(day, true)} align-middle`}>
-                              <select
-                                value={value}
-                                onChange={(e) => handleShiftChange(employee.id, day.dayNumber, e.target.value)}
-                                className="w-16 rounded-md border border-rose-200/40 bg-slate-950/80 px-2 py-1 text-[11px] text-rose-50 focus:border-rose-200 focus:ring-2 focus:ring-rose-400/60"
+                            <td
+                              key={`${employee.id}-edit-${day.dayNumber}`}
+                              className={`${getDayCellClasses(day, true)} align-middle`}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => handleToggleShift(employee.id, day.dayNumber)}
+                                className={`mx-auto flex h-8 w-16 items-center justify-center rounded-md border border-rose-200/40 px-2 text-[11px] font-semibold transition hover:scale-105 focus:outline-none focus:ring-2 focus:ring-rose-400/60 ${tone}`}
+                                title="Kliknij, aby przełączać dyżury (pusty → D → N → pusty)"
                               >
-                                <option value="">-</option>
-                                <option value="D">D</option>
-                                <option value="N">N</option>
-                              </select>
+                                {value || "—"}
+                              </button>
                             </td>
                           );
                         })}
