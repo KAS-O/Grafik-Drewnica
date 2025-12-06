@@ -272,7 +272,11 @@ export default function DashboardPage() {
       setAdminNotice({ type: "success", text: "Dodano nowego pracownika." });
     } catch (error) {
       console.error("Nie udało się dodać pracownika:", error);
-      setAdminNotice({ type: "error", text: "Nie udało się dodać pracownika. Sprawdź uprawnienia." });
+      const message =
+        error?.code === "permission-denied"
+          ? "Brak uprawnień administratora do dodawania pracowników."
+          : "Nie udało się dodać pracownika. Sprawdź uprawnienia.";
+      setAdminNotice({ type: "error", text: message });
     } finally {
       setFormPending(false);
     }

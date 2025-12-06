@@ -94,6 +94,17 @@ export function AuthProvider({ children }) {
             lastName: data.lastName || "",
             employeeId: data.employeeId || null
           };
+
+          // Jeżeli użytkownik jest wskazany jako admin (token lub env), a dokument ma inną rolę
+          // spróbujmy wyrównać rolę w bazie, aby reguły Firestore pozwoliły na zapisy.
+          if (normalizedRole === "Administrator" && data.role !== "Administrator") {
+            try {
+              await setDoc(userRef, { role: "Administrator" }, { merge: true });
+            } catch (syncError) {
+              console.warn("Nie udało się zsynchronizować roli administratora:", syncError);
+            }
+          }
+
           setRole(normalizedRole);
           setIsAdmin(normalizedRole === "Administrator");
           setProfile(profileData);
