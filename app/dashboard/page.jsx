@@ -82,36 +82,11 @@ function buildDays(date) {
       dayNumber,
       weekday,
       label: WEEKDAYS[weekday],
-      tone
+      tone,
+      isSaturday,
+      isSundayOrHoliday
     };
   });
-}
-
-function groupDaysByWeek(days) {
-  const weeks = [];
-  let currentWeek = [];
-
-  days.forEach((day) => {
-    const isoDay = day.weekday === 0 ? 7 : day.weekday;
-
-    if (isoDay === 1 && currentWeek.length) {
-      weeks.push(currentWeek);
-      currentWeek = [];
-    }
-
-    currentWeek.push({ ...day, isoDay });
-
-    if (isoDay === 7) {
-      weeks.push(currentWeek);
-      currentWeek = [];
-    }
-  });
-
-  if (currentWeek.length) {
-    weeks.push(currentWeek);
-  }
-
-  return weeks;
 }
 
 function mergeEntriesWithEmployees(entries, employees) {
@@ -129,6 +104,20 @@ function mergeEntriesWithEmployees(entries, employees) {
   });
 
   return next;
+}
+
+function getDayCellClasses(day, isEditable = false) {
+  const padding = isEditable ? "px-1.5 py-1" : "px-2 py-2";
+
+  if (day.isSundayOrHoliday) {
+    return `${padding} bg-rose-900/40 text-rose-50 border border-rose-500/30`;
+  }
+
+  if (day.isSaturday) {
+    return `${padding} bg-amber-900/30 text-amber-50 border border-amber-400/30`;
+  }
+
+  return `${padding} bg-slate-900/40 text-sky-50 border border-sky-200/20`;
 }
 
 export default function DashboardPage() {
@@ -158,7 +147,6 @@ export default function DashboardPage() {
   const isAdmin = role === "Administrator";
   const monthId = useMemo(() => getMonthKey(currentMonth), [currentMonth]);
   const days = useMemo(() => buildDays(currentMonth), [currentMonth]);
-  const weeks = useMemo(() => groupDaysByWeek(days), [days]);
 
   useEffect(() => {
     if (!user) return;
@@ -394,16 +382,21 @@ export default function DashboardPage() {
             {isAdmin && (
               <button
                 onClick={() => setAdminPanelOpen((prev) => !prev)}
-                className="rounded-full border border-emerald-400/50 bg-emerald-400/10 px-3 py-1.5 text-xs font-medium text-emerald-50 transition hover:bg-emerald-400/20"
+                className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                  adminPanelOpen
+                    ? "border-rose-400/70 bg-rose-500/20 text-rose-50 shadow-lg shadow-rose-500/30"
+                    : "border-rose-300/60 bg-rose-500/10 text-rose-50 hover:bg-rose-500/20"
+                }`}
               >
-                Administracja
+                <span className="h-2 w-2 rounded-full bg-current" />
+                Panel admina
               </button>
             )}
 
             <span
               className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${
                 isAdmin
-                  ? "border-emerald-400/60 bg-emerald-400/10 text-emerald-100"
+                  ? "border-rose-300/70 bg-rose-500/10 text-rose-50"
                   : "border-sky-400/60 bg-sky-400/10 text-sky-100"
               }`}
             >
@@ -450,137 +443,126 @@ export default function DashboardPage() {
 
         {/* Widok grafiku */}
         <section className="glass-panel rounded-3xl p-5 md:p-6">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Grafik tygodniowy</h2>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col gap-1">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Grafik miesięczny</h2>
               <p className="text-xs text-sky-100/80">
-                Każda karta obejmuje poniedziałek-niedzielę, kolory odzwierciedlają typ dnia.
+                Układ poziomy inspirowany tabelą – po lewej pracownicy, w kolumnach kolejne dni miesiąca.
               </p>
             </div>
-            <span className="rounded-full bg-sky-400/10 px-3 py-1 text-[11px] font-medium text-sky-200">
-              {visibleEmployees.length ? `${visibleEmployees.length} prac.` : "Brak przypisania"}
-            </span>
+            <div className="flex items-center gap-2 text-[11px] font-medium text-sky-100">
+              <span className="rounded-full bg-sky-400/10 px-3 py-1">{days.length} dni</span>
+              <span className="rounded-full bg-sky-400/10 px-3 py-1">
+                {visibleEmployees.length ? `${visibleEmployees.length} prac.` : "Brak przypisania"}
+              </span>
+            </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {weeks.map((weekDays, index) => {
-              const firstDay = weekDays[0]?.dayNumber;
-              const lastDay = weekDays[weekDays.length - 1]?.dayNumber;
-              const label = `Tydzień ${firstDay}-${lastDay}`;
-
-              return (
-                <div
-                  key={`${label}-${index}`}
-                  className="rounded-2xl border border-sky-200/30 bg-slate-950/40 p-4 shadow-sm transition hover:shadow-lg"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-sky-50">{label}</p>
-                      <p className="text-[11px] text-sky-100/70">Poniedziałek - Niedziela</p>
-                    </div>
-                    {personalEmployee && (
-                      <span className="rounded-full bg-sky-400/10 px-3 py-1 text-[11px] font-semibold text-sky-50">
-                        Twoje dyżury
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="mt-3 space-y-2">
-                    {weekDays.map((day) => {
-                      const shiftsForDay = visibleEmployees
-                        .map((employee) => {
-                          const entry = scheduleEntries[employee.id];
-                          const shift = entry?.shifts?.[day.dayNumber];
-                          return shift ? `${entry.fullName}: ${shift}` : null;
-                        })
-                        .filter(Boolean);
-
-                      const personalShift = personalEmployee
-                        ? scheduleEntries[personalEmployee.id]?.shifts?.[day.dayNumber]
-                        : null;
-
+          <div className="overflow-auto rounded-2xl border border-sky-200/30">
+            <table className="min-w-full text-[11px] text-sky-50">
+              <thead className="bg-slate-900/60">
+                <tr>
+                  <th className="sticky left-0 z-10 bg-slate-900/60 px-4 py-3 text-left text-xs font-semibold">Pracownik</th>
+                  {days.map((day) => (
+                    <th
+                      key={`day-header-${day.dayNumber}`}
+                      className={`${getDayCellClasses(day)} text-center text-[10px] font-semibold`}
+                    >
+                      <div className="flex flex-col items-center gap-0.5">
+                        <span className="text-xs">{day.dayNumber}</span>
+                        <span className="text-[10px] uppercase tracking-wide opacity-80">
+                          {day.label.slice(0, 3)}
+                        </span>
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visibleEmployees.map((employee) => (
+                  <tr key={`row-${employee.id}`} className="odd:bg-slate-900/40 even:bg-slate-900/20">
+                    <td className="sticky left-0 z-10 bg-slate-950/80 px-4 py-3 text-left">
+                      <div className="font-semibold">{employee.firstName} {employee.lastName}</div>
+                      <div className="text-[10px] uppercase tracking-wide text-sky-100/70">{employee.position}</div>
+                    </td>
+                    {days.map((day) => {
+                      const entry = scheduleEntries[employee.id];
+                      const value = entry?.shifts?.[day.dayNumber] || "";
+                      const isPersonal = personalEmployee && personalEmployee.id === employee.id;
                       return (
-                        <div
-                          key={`${label}-${day.dayNumber}`}
-                          className={`${day.tone} rounded-xl border px-3 py-2`}
+                        <td
+                          key={`${employee.id}-day-${day.dayNumber}`}
+                          className={`${getDayCellClasses(day)} text-center align-middle`}
                         >
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="text-[13px] font-semibold">{day.label}</p>
-                              <p className="text-[11px] text-slate-700">Dzień {day.dayNumber}</p>
-                            </div>
-                            {personalShift && (
-                              <span className="rounded-full bg-slate-900/10 px-2 py-1 text-[11px] font-semibold text-slate-800">
-                                {personalShift}
-                              </span>
-                            )}
-                          </div>
-                          <div className="mt-2 space-y-1 text-[11px] text-slate-800">
-                            {shiftsForDay.length > 0 ? (
-                              shiftsForDay.map((shift) => (
-                                <p key={`${shift}-${day.dayNumber}`} className="font-semibold">
-                                  {shift}
-                                </p>
-                              ))
-                            ) : (
-                              <p className="text-slate-600">Brak zaplanowanego dyżuru.</p>
-                            )}
-                          </div>
-                        </div>
+                          {value ? (
+                            <span
+                              className={`inline-flex min-w-[28px] items-center justify-center rounded-full px-2 py-1 text-[10px] font-bold ${
+                                isPersonal ? "bg-slate-900/60 ring-2 ring-sky-300/60" : "bg-slate-900/30"
+                              }`}
+                            >
+                              {value}
+                            </span>
+                          ) : (
+                            <span className="text-sky-100/60">—</span>
+                          )}
+                        </td>
                       );
                     })}
-                  </div>
-                </div>
-              );
-            })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </section>
-
         {/* Panel administratora */}
         {isAdmin && adminPanelOpen && (
-          <section className="glass-panel rounded-3xl p-5 md:p-6">
+          <section className="rounded-3xl border-2 border-rose-400/40 bg-gradient-to-br from-rose-950/70 via-slate-950 to-slate-950 p-5 md:p-6 shadow-xl shadow-rose-500/20">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Panel administracyjny</h2>
-                <p className="text-xs text-sky-100/80">
-                  Dodawaj pracowników, przypisuj konta i twórz grafik za pomocą tabeli poniżej.
+                <div className="mb-1 inline-flex items-center gap-2 rounded-full bg-rose-500/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-rose-100">
+                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                  Tryb administratora
+                </div>
+                <h2 className="text-lg font-bold text-rose-50">Panel administracyjny</h2>
+                <p className="text-xs text-rose-100/80">
+                  Dodawaj pracowników, przypisuj konta i edytuj grafik w widoku poziomej tabeli.
                 </p>
               </div>
               {statusMessage && (
-                <span className="rounded-full bg-sky-400/10 px-3 py-1 text-[11px] font-medium text-sky-200">
+                <span className="rounded-full border border-rose-300/50 bg-rose-500/20 px-3 py-1 text-[11px] font-medium text-rose-50">
                   {statusMessage}
                 </span>
               )}
             </div>
 
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
-              <form onSubmit={handleAddEmployee} className="rounded-2xl border border-sky-200/30 bg-slate-950/30 p-4">
-                <h3 className="text-sm font-semibold text-sky-50">Dodaj pracownika</h3>
+              <form onSubmit={handleAddEmployee} className="rounded-2xl border border-rose-300/40 bg-rose-950/40 p-4">
+                <h3 className="text-sm font-semibold text-rose-50">Dodaj pracownika</h3>
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  <label className="text-xs text-sky-100/80">
+                  <label className="text-xs text-rose-100/80">
                     Imię
                     <input
                       value={employeeForm.firstName}
                       onChange={(e) => setEmployeeForm((prev) => ({ ...prev, firstName: e.target.value }))}
-                      className="mt-1 w-full rounded-xl border border-sky-200/40 bg-slate-900/40 px-3 py-2 text-sm text-sky-50 focus:border-sky-300 focus:ring-2 focus:ring-sky-400/50"
+                      className="mt-1 w-full rounded-xl border border-rose-200/40 bg-slate-950/60 px-3 py-2 text-sm text-rose-50 focus:border-rose-200 focus:ring-2 focus:ring-rose-400/60"
                       required
                     />
                   </label>
-                  <label className="text-xs text-sky-100/80">
+                  <label className="text-xs text-rose-100/80">
                     Nazwisko
                     <input
                       value={employeeForm.lastName}
                       onChange={(e) => setEmployeeForm((prev) => ({ ...prev, lastName: e.target.value }))}
-                      className="mt-1 w-full rounded-xl border border-sky-200/40 bg-slate-900/40 px-3 py-2 text-sm text-sky-50 focus:border-sky-300 focus:ring-2 focus:ring-sky-400/50"
+                      className="mt-1 w-full rounded-xl border border-rose-200/40 bg-slate-950/60 px-3 py-2 text-sm text-rose-50 focus:border-rose-200 focus:ring-2 focus:ring-rose-400/60"
                       required
                     />
                   </label>
-                  <label className="text-xs text-sky-100/80 md:col-span-2">
+                  <label className="text-xs text-rose-100/80 md:col-span-2">
                     Stanowisko
                     <select
                       value={employeeForm.position}
                       onChange={(e) => setEmployeeForm((prev) => ({ ...prev, position: e.target.value }))}
-                      className="mt-1 w-full rounded-xl border border-sky-200/40 bg-slate-900/40 px-3 py-2 text-sm text-sky-50 focus:border-sky-300 focus:ring-2 focus:ring-sky-400/50"
+                      className="mt-1 w-full rounded-xl border border-rose-200/40 bg-slate-950/60 px-3 py-2 text-sm text-rose-50 focus:border-rose-200 focus:ring-2 focus:ring-rose-400/60"
                     >
                       {POSITIONS.map((pos) => (
                         <option key={pos} value={pos}>
@@ -592,21 +574,21 @@ export default function DashboardPage() {
                 </div>
                 <button
                   type="submit"
-                  className="mt-4 w-full rounded-xl bg-gradient-to-r from-sky-500 via-sky-400 to-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110"
+                  className="mt-4 w-full rounded-xl bg-gradient-to-r from-rose-500 via-amber-400 to-rose-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110"
                 >
                   Dodaj pracownika
                 </button>
               </form>
 
-              <form onSubmit={handleAssignAccount} className="rounded-2xl border border-sky-200/30 bg-slate-950/30 p-4">
-                <h3 className="text-sm font-semibold text-sky-50">Przypisz konto do pracownika</h3>
+              <form onSubmit={handleAssignAccount} className="rounded-2xl border border-rose-300/40 bg-rose-950/40 p-4">
+                <h3 className="text-sm font-semibold text-rose-50">Przypisz konto do pracownika</h3>
                 <div className="mt-3 grid gap-3">
-                  <label className="text-xs text-sky-100/80">
+                  <label className="text-xs text-rose-100/80">
                     Pracownik
                     <select
                       value={assignmentForm.employeeId}
                       onChange={(e) => setAssignmentForm((prev) => ({ ...prev, employeeId: e.target.value }))}
-                      className="mt-1 w-full rounded-xl border border-sky-200/40 bg-slate-900/40 px-3 py-2 text-sm text-sky-50 focus:border-sky-300 focus:ring-2 focus:ring-sky-400/50"
+                      className="mt-1 w-full rounded-xl border border-rose-200/40 bg-slate-950/60 px-3 py-2 text-sm text-rose-50 focus:border-rose-200 focus:ring-2 focus:ring-rose-400/60"
                       required
                     >
                       <option value="">Wybierz pracownika</option>
@@ -618,13 +600,13 @@ export default function DashboardPage() {
                     </select>
                   </label>
 
-                  <label className="text-xs text-sky-100/80">
+                  <label className="text-xs text-rose-100/80">
                     Email konta (Firebase)
                     <input
                       type="email"
                       value={assignmentForm.accountEmail}
                       onChange={(e) => setAssignmentForm((prev) => ({ ...prev, accountEmail: e.target.value }))}
-                      className="mt-1 w-full rounded-xl border border-sky-200/40 bg-slate-900/40 px-3 py-2 text-sm text-sky-50 focus:border-sky-300 focus:ring-2 focus:ring-sky-400/50"
+                      className="mt-1 w-full rounded-xl border border-rose-200/40 bg-slate-950/60 px-3 py-2 text-sm text-rose-50 focus:border-rose-200 focus:ring-2 focus:ring-rose-400/60"
                       placeholder="np. jan.kowalski@drewnica.pl"
                       required
                     />
@@ -632,75 +614,64 @@ export default function DashboardPage() {
                 </div>
                 <button
                   type="submit"
-                  className="mt-4 w-full rounded-xl bg-gradient-to-r from-emerald-500 via-sky-400 to-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110"
+                  className="mt-4 w-full rounded-xl bg-gradient-to-r from-amber-400 via-rose-400 to-sky-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110"
                 >
                   Przypisz konto
                 </button>
               </form>
             </div>
 
-            <div className="mt-6">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-sky-50">Tabela edycji grafiku</h3>
+            <div className="mt-6 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-rose-50">Tabela edycji grafiku (poziomo)</h3>
                 <button
                   onClick={handleSaveSchedule}
                   disabled={scheduleSaving}
-                  className="rounded-xl bg-gradient-to-r from-sky-500 via-sky-400 to-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-wait disabled:opacity-75"
+                  className="rounded-xl bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-wait disabled:opacity-75"
                 >
                   {scheduleSaving ? "Zapisywanie..." : "Zapisz grafik"}
                 </button>
               </div>
 
-              <div className="mt-3 overflow-auto rounded-2xl border border-sky-200/30">
-                <table className="min-w-full divide-y divide-sky-200/30 text-xs text-sky-50">
-                  <thead className="bg-slate-900/60">
+              <div className="overflow-auto rounded-2xl border border-rose-300/40">
+                <table className="min-w-full text-[11px] text-rose-50">
+                  <thead className="bg-rose-950/60">
                     <tr>
-                      <th className="px-4 py-3 text-left font-semibold">Pracownik</th>
-                      {weeks.map((weekDays, index) => {
-                        const firstDay = weekDays[0]?.dayNumber;
-                        const lastDay = weekDays[weekDays.length - 1]?.dayNumber;
-                        return (
-                          <th key={`week-${index}`} className="px-3 py-3 text-left font-semibold">
-                            <div>{`Tydzień ${firstDay}-${lastDay}`}</div>
-                            <div className="text-[10px] font-normal text-sky-100/70">Pon - Nd</div>
-                          </th>
-                        );
-                      })}
+                      <th className="sticky left-0 z-10 bg-rose-950/80 px-4 py-3 text-left font-semibold">Pracownik</th>
+                      {days.map((day) => (
+                        <th
+                          key={`edit-day-${day.dayNumber}`}
+                          className={`${getDayCellClasses(day, true)} text-center text-[10px] font-semibold`}
+                        >
+                          <div className="flex flex-col items-center gap-0.5">
+                            <span className="text-xs">{day.dayNumber}</span>
+                            <span className="text-[10px] uppercase tracking-wide opacity-80">{day.label.slice(0, 3)}</span>
+                          </div>
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
                     {employees.map((employee) => (
-                      <tr key={employee.id} className="odd:bg-slate-900/40 even:bg-slate-900/20">
-                        <td className="whitespace-nowrap px-4 py-3 text-left font-medium">
+                      <tr key={employee.id} className="odd:bg-rose-950/40 even:bg-rose-950/20">
+                        <td className="sticky left-0 z-10 whitespace-nowrap bg-rose-950/70 px-4 py-3 text-left font-medium">
                           <div>{employee.firstName} {employee.lastName}</div>
-                          <div className="text-[11px] text-sky-100/70">{employee.position}</div>
+                          <div className="text-[10px] text-rose-100/80">{employee.position}</div>
                         </td>
-                        {weeks.map((weekDays, weekIndex) => {
+                        {days.map((day) => {
                           const entry = scheduleEntries[employee.id] || { shifts: {} };
+                          const value = entry.shifts?.[day.dayNumber] || "";
                           return (
-                            <td key={`${employee.id}-week-${weekIndex}`} className="px-3 py-2 align-top">
-                              <div className="grid gap-2 rounded-xl border border-sky-200/20 bg-slate-900/30 p-2">
-                                {weekDays.map((day) => {
-                                  const value = entry.shifts?.[day.dayNumber] || "";
-                                  return (
-                                    <label
-                                      key={`${employee.id}-${day.dayNumber}`}
-                                      className="flex items-center justify-between gap-2 text-[11px]"
-                                    >
-                                      <span className="text-sky-50">{day.label}</span>
-                                      <select
-                                        value={value}
-                                        onChange={(e) => handleShiftChange(employee.id, day.dayNumber, e.target.value)}
-                                        className="w-16 rounded-md border border-sky-200/40 bg-slate-900/60 px-2 py-1 text-[11px] text-sky-50 focus:border-sky-300 focus:ring-2 focus:ring-sky-400/50"
-                                      >
-                                        <option value="">-</option>
-                                        <option value="D">D</option>
-                                        <option value="N">N</option>
-                                      </select>
-                                    </label>
-                                  );
-                                })}
-                              </div>
+                            <td key={`${employee.id}-edit-${day.dayNumber}`} className={`${getDayCellClasses(day, true)} align-middle`}>
+                              <select
+                                value={value}
+                                onChange={(e) => handleShiftChange(employee.id, day.dayNumber, e.target.value)}
+                                className="w-16 rounded-md border border-rose-200/40 bg-slate-950/80 px-2 py-1 text-[11px] text-rose-50 focus:border-rose-200 focus:ring-2 focus:ring-rose-400/60"
+                              >
+                                <option value="">-</option>
+                                <option value="D">D</option>
+                                <option value="N">N</option>
+                              </select>
                             </td>
                           );
                         })}

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
+import { getIdTokenResult, onAuthStateChanged } from "firebase/auth";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
 import { app, auth } from "../lib/firebase";
 
@@ -36,10 +36,19 @@ export function AuthProvider({ children }) {
         const db = getFirestore(app);
         const userRef = doc(db, "users", firebaseUser.uid);
         const snap = await getDoc(userRef);
+        const tokenResult = await getIdTokenResult(firebaseUser);
+        const hasAdminClaim = tokenResult?.claims?.admin === true;
+
+        const normalizeRole = (rawRole) => {
+          const value = (rawRole || "").toLowerCase();
+          if (hasAdminClaim) return "Administrator";
+          if (value === "administrator" || value === "admin") return "Administrator";
+          return "Użytkownik";
+        };
 
         if (snap.exists()) {
           const data = snap.data();
-          setRole(data.role || "Użytkownik");
+          setRole(normalizeRole(data.role));
           setProfile({
             firstName: data.firstName || "",
             lastName: data.lastName || "",
@@ -47,7 +56,7 @@ export function AuthProvider({ children }) {
           });
         } else {
           // Domyślnie traktujemy jako zwykłego użytkownika
-          setRole("Użytkownik");
+          setRole(normalizeRole(null));
           setProfile({ firstName: firebaseUser.displayName || "", lastName: "", employeeId: null });
         }
       } catch (error) {
