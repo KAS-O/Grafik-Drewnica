@@ -106,6 +106,22 @@ function mergeEntriesWithEmployees(entries, employees) {
   return next;
 }
 
+function getNextShiftValue(current) {
+  if (current === "D") return "N";
+  if (current === "N") return "";
+  return "D";
+}
+
+function getShiftTone(value) {
+  if (value === "D") {
+    return "bg-amber-400/90 text-amber-950 border border-amber-200/60";
+  }
+  if (value === "N") {
+    return "bg-indigo-400/90 text-indigo-950 border border-indigo-200/60";
+  }
+  return "bg-slate-900/70 text-rose-50/80 border border-rose-200/30";
+}
+
 function getDayCellClasses(day, isEditable = false) {
   const padding = isEditable ? "px-1.5 py-1" : "px-2 py-2";
 
@@ -143,6 +159,12 @@ export default function DashboardPage() {
       router.replace("/");
     }
   }, [loading, user, router]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setAdminPanelOpen(false);
+    }
+  }, [isAdmin]);
 
   const isAdmin = role === "Administrator";
   const monthId = useMemo(() => getMonthKey(currentMonth), [currentMonth]);
@@ -222,10 +244,23 @@ export default function DashboardPage() {
     e.preventDefault();
     setStatusMessage("");
 
+    if (!isAdmin) {
+      setStatusMessage("Tylko administrator może dodawać pracowników.");
+      return;
+    }
+
+    const firstName = employeeForm.firstName.trim();
+    const lastName = employeeForm.lastName.trim();
+
+    if (!firstName || !lastName) {
+      setStatusMessage("Uzupełnij imię i nazwisko pracownika.");
+      return;
+    }
+
     try {
       const payload = {
-        firstName: employeeForm.firstName.trim(),
-        lastName: employeeForm.lastName.trim(),
+        firstName,
+        lastName,
         position: employeeForm.position,
         assignedUserId: null,
         assignedUserEmail: null,
@@ -233,7 +268,9 @@ export default function DashboardPage() {
       };
 
       const ref = await addDoc(collection(db, "employees"), payload);
-      setEmployees((prev) => [...prev, { id: ref.id, ...payload }]);
+      const createdEmployee = { id: ref.id, ...payload };
+      setEmployees((prev) => [...prev, createdEmployee]);
+      setScheduleEntries((prev) => mergeEntriesWithEmployees(prev, [createdEmployee]));
       setEmployeeForm({ firstName: "", lastName: "", position: POSITIONS[0] });
       setStatusMessage("Dodano nowego pracownika.");
     } catch (error) {
@@ -246,6 +283,11 @@ export default function DashboardPage() {
     e.preventDefault();
     if (!assignmentForm.employeeId || !assignmentForm.accountEmail) return;
     setStatusMessage("");
+
+    if (!isAdmin) {
+      setStatusMessage("Tylko administrator może przypisywać konta do pracowników.");
+      return;
+    }
 
     try {
       const userQuery = query(
@@ -292,15 +334,31 @@ export default function DashboardPage() {
 
   const handleShiftChange = (employeeId, dayNumber, value) => {
     setScheduleEntries((prev) => {
+      const employee = employees.find((emp) => emp.id === employeeId);
       const current = prev[employeeId] || { shifts: {} };
+      const metadata =
+        current.fullName || current.position
+          ? {}
+          : {
+              fullName: employee ? `${employee.firstName} ${employee.lastName}`.trim() : "",
+              position: employee?.position || "",
+              userId: employee?.assignedUserId || null
+            };
       return {
         ...prev,
         [employeeId]: {
+          ...metadata,
           ...current,
           shifts: { ...current.shifts, [dayNumber]: value }
         }
       };
     });
+  };
+
+  const handleToggleShift = (employeeId, dayNumber) => {
+    const currentValue = scheduleEntries?.[employeeId]?.shifts?.[dayNumber] || "";
+    const nextValue = getNextShiftValue(currentValue);
+    handleShiftChange(employeeId, dayNumber, nextValue);
   };
 
   const handleSaveSchedule = async () => {
@@ -525,7 +583,8 @@ export default function DashboardPage() {
                 </div>
                 <h2 className="text-lg font-bold text-rose-50">Panel administracyjny</h2>
                 <p className="text-xs text-rose-100/80">
-                  Dodawaj pracowników, przypisuj konta i edytuj grafik w widoku poziomej tabeli.
+                  Dodawaj wirtualnych pracowników (imię, nazwisko, stanowisko), przypisuj ich do kont i klikaj w pola grafiku,
+                  aby przełączać dyżury D / N lub je usuwać.
                 </p>
               </div>
               {statusMessage && (
@@ -623,7 +682,7 @@ export default function DashboardPage() {
 
             <div className="mt-6 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-rose-50">Tabela edycji grafiku (poziomo)</h3>
+                <h3 className="text-sm font-semibold text-rose-50">Pełny grafik administracyjny</h3>
                 <button
                   onClick={handleSaveSchedule}
                   disabled={scheduleSaving}
@@ -662,16 +721,18 @@ export default function DashboardPage() {
                           const entry = scheduleEntries[employee.id] || { shifts: {} };
                           const value = entry.shifts?.[day.dayNumber] || "";
                           return (
-                            <td key={`${employee.id}-edit-${day.dayNumber}`} className={`${getDayCellClasses(day, true)} align-middle`}>
-                              <select
-                                value={value}
-                                onChange={(e) => handleShiftChange(employee.id, day.dayNumber, e.target.value)}
-                                className="w-16 rounded-md border border-rose-200/40 bg-slate-950/80 px-2 py-1 text-[11px] text-rose-50 focus:border-rose-200 focus:ring-2 focus:ring-rose-400/60"
+                            <td
+                              key={`${employee.id}-edit-${day.dayNumber}`}
+                              className={`${getDayCellClasses(day, true)} align-middle text-center`}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => handleToggleShift(employee.id, day.dayNumber)}
+                                className={`inline-flex h-9 w-16 items-center justify-center rounded-lg text-[11px] font-semibold transition ${getShiftTone(value)} hover:brightness-110`}
+                                aria-label={`Ustaw dyżur dla ${employee.firstName} ${employee.lastName} w dniu ${day.dayNumber}`}
                               >
-                                <option value="">-</option>
-                                <option value="D">D</option>
-                                <option value="N">N</option>
-                              </select>
+                                {value || "—"}
+                              </button>
                             </td>
                           );
                         })}
