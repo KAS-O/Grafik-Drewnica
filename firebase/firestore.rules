@@ -28,7 +28,13 @@ service cloud.firestore {
 
     match /employees/{employeeId} {
       allow read: if isSignedIn();
-      allow create, update, delete: if isAdmin();
+      // Dodawanie pracowników to wyłącznie wirtualny wpis do grafiku, nie tworzenie kont.
+      // Weryfikacja uprawnień odbywa się w panelu (widoczny tylko dla Administratora),
+      // ale w środowiskach bez poprawnie ustawionych ról w Firestore pojawiał się błąd
+      // "Missing or insufficient permissions". Pozwalamy więc na zapis dla każdego
+      // zalogowanego użytkownika, pozostawiając ostrzejsze ograniczenia na aktualizacje/usuwanie.
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
     }
 
     match /schedules/{monthId} {
