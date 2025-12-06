@@ -11,12 +11,19 @@ service cloud.firestore {
         : null;
     }
 
+    function isAdminRole(roleValue) {
+      return lower(roleValue).matches('^\\s*(administrator|admin)\\s*$');
+    }
+
     function isAdmin() {
-      // Admin jeśli w dokumencie users/{uid} ma rolę (pisownia nie ma znaczenia)
+      // Admin jeśli w dokumencie users/{uid} ma rolę (pisownia i białe znaki nie mają znaczenia)
       // lub gdy ma ustawiony custom claim `admin: true`.
-      return (userRecord() != null && userRecord().exists() &&
-        (lower(userRecord().data.role) == "administrator" || lower(userRecord().data.role) == "admin"))
-        || (isSignedIn() && request.auth.token.admin == true);
+      let record = userRecord();
+      let roleValue = record != null && record.exists() && record.data.role is string
+        ? record.data.role
+        : "";
+
+      return isAdminRole(roleValue) || (isSignedIn() && request.auth.token.admin == true);
     }
 
     function isSelf(userId) {

@@ -18,6 +18,13 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const normalizeRole = (rawRole, hasAdminClaim = false) => {
+    const value = (rawRole || "").trim().toLowerCase();
+    if (hasAdminClaim) return "Administrator";
+    if (value === "administrator" || value === "admin") return "Administrator";
+    return "Użytkownik";
+  };
+
   useEffect(() => {
     setLoading(true);
 
@@ -39,16 +46,9 @@ export function AuthProvider({ children }) {
         const tokenResult = await getIdTokenResult(firebaseUser);
         const hasAdminClaim = tokenResult?.claims?.admin === true;
 
-        const normalizeRole = (rawRole) => {
-          const value = (rawRole || "").toLowerCase();
-          if (hasAdminClaim) return "Administrator";
-          if (value === "administrator" || value === "admin") return "Administrator";
-          return "Użytkownik";
-        };
-
         if (snap.exists()) {
           const data = snap.data();
-          setRole(normalizeRole(data.role));
+          setRole(normalizeRole(data.role, hasAdminClaim));
           setProfile({
             firstName: data.firstName || "",
             lastName: data.lastName || "",
@@ -56,7 +56,7 @@ export function AuthProvider({ children }) {
           });
         } else {
           // Domyślnie traktujemy jako zwykłego użytkownika
-          setRole(normalizeRole(null));
+          setRole(normalizeRole(null, hasAdminClaim));
           setProfile({ firstName: firebaseUser.displayName || "", lastName: "", employeeId: null });
         }
       } catch (error) {
