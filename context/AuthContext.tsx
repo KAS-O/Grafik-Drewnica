@@ -1,26 +1,38 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import type { User } from "firebase/auth";
 import { getIdTokenResult, onAuthStateChanged } from "firebase/auth";
+import type { Firestore } from "firebase/firestore";
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import type { ReactNode } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { app, auth } from "../lib/firebase";
 
-const AuthContext = createContext({
-  user: null,
-  role: null,
-  profile: null,
-  loading: true,
-  isAdmin: false
-});
+interface AuthProfile {
+  firstName: string;
+  lastName: string;
+}
 
-export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [role, setRole] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
+type UserRole = "Administrator" | "Użytkownik";
 
-  const normalizeRole = (rawRole) => {
+interface AuthContextValue {
+  user: User | null;
+  role: UserRole | null;
+  profile: AuthProfile | null;
+  loading: boolean;
+  isAdmin: boolean;
+}
+
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [role, setRole] = useState<UserRole | null>(null);
+  const [profile, setProfile] = useState<AuthProfile | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+
+  const normalizeRole = (rawRole: string | undefined | null): UserRole => {
     return rawRole === "Administrator" ? "Administrator" : "Użytkownik";
   };
 
@@ -40,13 +52,13 @@ export function AuthProvider({ children }) {
       setUser(firebaseUser);
 
       try {
-        const db = getFirestore(app);
+        const db: Firestore = getFirestore(app);
         const userRef = doc(db, "users", firebaseUser.uid);
         const tokenResult = await getIdTokenResult(firebaseUser);
         const hasAdminClaim = tokenResult?.claims?.admin === true;
 
         const snap = await getDoc(userRef);
-        const baseProfile = {
+        const baseProfile: AuthProfile = {
           firstName: firebaseUser.displayName || "",
           lastName: ""
         };
@@ -75,12 +87,11 @@ export function AuthProvider({ children }) {
 
         const data = snap.data();
         const normalizedRole = normalizeRole(data.role);
-        const profileData = {
+        const profileData: AuthProfile = {
           firstName: data.firstName || "",
           lastName: data.lastName || ""
         };
 
-        // Synchronizuj rolę, jeśli w tokenie jest claim admina
         if (hasAdminClaim && data.role !== "Administrator") {
           try {
             await setDoc(userRef, { role: "Administrator" }, { merge: true });
@@ -112,6 +123,10 @@ export function AuthProvider({ children }) {
   );
 }
 
-export function useAuth() {
-  return useContext(AuthContext);
+export function useAuth(): AuthContextValue {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+  return context;
 }
