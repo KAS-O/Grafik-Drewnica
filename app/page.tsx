@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "../lib/firebase";
@@ -21,20 +21,21 @@ export default function LoginPage() {
     }
   }, [user, loading, router]);
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError("");
     setPending(true);
     try {
       await signInWithEmailAndPassword(auth, login, password);
       router.replace("/dashboard");
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
       let message = "Logowanie nie powiodło się. Sprawdź dane i spróbuj ponownie.";
-      if (err?.code === "auth/invalid-email") {
+      const errorObj = err as { code?: string };
+      if (errorObj?.code === "auth/invalid-email") {
         message = "Nieprawidłowy format loginu (email).";
       }
-      if (err?.code === "auth/user-not-found" || err?.code === "auth/wrong-password") {
+      if (errorObj?.code === "auth/user-not-found" || errorObj?.code === "auth/wrong-password") {
         message = "Nieprawidłowy login lub hasło.";
       }
       setError(message);
@@ -42,6 +43,9 @@ export default function LoginPage() {
       setPending(false);
     }
   };
+
+  const handleLoginChange = (event: ChangeEvent<HTMLInputElement>) => setLogin(event.target.value);
+  const handlePasswordChange = (event: ChangeEvent<HTMLInputElement>) => setPassword(event.target.value);
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
@@ -108,7 +112,7 @@ export default function LoginPage() {
                   autoComplete="email"
                   required
                   value={login}
-                  onChange={(e) => setLogin(e.target.value)}
+                  onChange={handleLoginChange}
                   className="block w-full rounded-2xl border border-sky-400/40 bg-slate-950/40 px-3 py-2.5 text-sm text-sky-50 shadow-inner outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-400/70"
                   placeholder="np. jan.kowalski@drewnica.pl"
                 />
@@ -127,7 +131,7 @@ export default function LoginPage() {
                   autoComplete="current-password"
                   required
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={handlePasswordChange}
                   className="block w-full rounded-2xl border border-sky-400/40 bg-slate-950/40 px-3 py-2.5 text-sm text-sky-50 shadow-inner outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-400/70"
                   placeholder="Wpisz hasło"
                 />

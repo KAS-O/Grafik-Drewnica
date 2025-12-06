@@ -1,28 +1,39 @@
 "use client";
 
+import type { PropsWithChildren } from "react";
 import { createContext, useContext, useEffect, useState } from "react";
+import type { User } from "firebase/auth";
 import { getIdTokenResult, onAuthStateChanged } from "firebase/auth";
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { app, auth } from "../lib/firebase";
 
-const AuthContext = createContext({
-  user: null,
-  role: null,
-  profile: null,
-  loading: true,
-  isAdmin: false
-});
+type UserRole = "Administrator" | "Użytkownik";
 
-export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [role, setRole] = useState(null);
-  const [profile, setProfile] = useState(null);
+type UserProfile = {
+  firstName: string;
+  lastName: string;
+};
+
+interface AuthContextValue {
+  user: User | null;
+  role: UserRole | null;
+  profile: UserProfile | null;
+  loading: boolean;
+  isAdmin: boolean;
+}
+
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+const normalizeRole = (rawRole?: string | null): UserRole => {
+  return rawRole === "Administrator" ? "Administrator" : "Użytkownik";
+};
+
+export function AuthProvider({ children }: PropsWithChildren) {
+  const [user, setUser] = useState<User | null>(null);
+  const [role, setRole] = useState<UserRole | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
-
-  const normalizeRole = (rawRole) => {
-    return rawRole === "Administrator" ? "Administrator" : "Użytkownik";
-  };
 
   useEffect(() => {
     setLoading(true);
@@ -46,7 +57,7 @@ export function AuthProvider({ children }) {
         const hasAdminClaim = tokenResult?.claims?.admin === true;
 
         const snap = await getDoc(userRef);
-        const baseProfile = {
+        const baseProfile: UserProfile = {
           firstName: firebaseUser.displayName || "",
           lastName: ""
         };
@@ -73,14 +84,13 @@ export function AuthProvider({ children }) {
           return;
         }
 
-        const data = snap.data();
+        const data = snap.data() as { role?: string; firstName?: string; lastName?: string };
         const normalizedRole = normalizeRole(data.role);
-        const profileData = {
+        const profileData: UserProfile = {
           firstName: data.firstName || "",
           lastName: data.lastName || ""
         };
 
-        // Synchronizuj rolę, jeśli w tokenie jest claim admina
         if (hasAdminClaim && data.role !== "Administrator") {
           try {
             await setDoc(userRef, { role: "Administrator" }, { merge: true });
@@ -105,6 +115,10 @@ export function AuthProvider({ children }) {
     return () => unsubscribe();
   }, []);
 
+  if (!AuthContext) {
+    throw new Error("AuthContext nie został zainicjalizowany.");
+  }
+
   return (
     <AuthContext.Provider value={{ user, role, profile, loading, isAdmin }}>
       {children}
@@ -112,6 +126,12 @@ export function AuthProvider({ children }) {
   );
 }
 
-export function useAuth() {
-  return useContext(AuthContext);
+export function useAuth(): AuthContextValue {
+  const context = useContext(AuthContext);
+
+  if (!context) {
+    throw new Error("useAuth musi być użyty wewnątrz AuthProvider");
+  }
+
+  return context;
 }
