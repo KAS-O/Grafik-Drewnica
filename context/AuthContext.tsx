@@ -6,6 +6,7 @@ import type { User } from "firebase/auth";
 import { getIdTokenResult, onAuthStateChanged } from "firebase/auth";
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { app, auth } from "../lib/firebase";
+import { SUPER_ADMIN_UIDS } from "../lib/admin";
 
 type UserRole = "Administrator" | "Użytkownik";
 
@@ -55,6 +56,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         const userRef = doc(db, "users", firebaseUser.uid);
         const tokenResult = await getIdTokenResult(firebaseUser);
         const hasAdminClaim = tokenResult?.claims?.admin === true;
+        const isSuperAdmin = SUPER_ADMIN_UIDS.includes(firebaseUser.uid);
 
         const snap = await getDoc(userRef);
         const baseProfile: UserProfile = {
@@ -64,7 +66,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
         if (!snap.exists()) {
           const payload = {
-            role: hasAdminClaim ? "Administrator" : "Użytkownik",
+            role: hasAdminClaim || isSuperAdmin ? "Administrator" : "Użytkownik",
             email: firebaseUser.email || "",
             ...baseProfile,
             createdAt: serverTimestamp()
@@ -85,13 +87,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
         }
 
         const data = snap.data() as { role?: string; firstName?: string; lastName?: string };
-        const normalizedRole = normalizeRole(data.role);
+        const normalizedRole = normalizeRole(isSuperAdmin ? "Administrator" : data.role);
         const profileData: UserProfile = {
           firstName: data.firstName || "",
           lastName: data.lastName || ""
         };
 
-        if (hasAdminClaim && data.role !== "Administrator") {
+        if ((hasAdminClaim || isSuperAdmin) && data.role !== "Administrator") {
           try {
             await setDoc(userRef, { role: "Administrator" }, { merge: true });
           } catch (syncError) {
