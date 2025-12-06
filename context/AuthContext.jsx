@@ -4,7 +4,6 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { getIdTokenResult, onAuthStateChanged } from "firebase/auth";
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { app, auth } from "../lib/firebase";
-import { SUPER_ADMIN_UIDS } from "../lib/admin";
 
 const AuthContext = createContext({
   user: null,
@@ -21,16 +20,8 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "")
-    .split(",")
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-
-  const normalizeRole = (rawRole, hasAdminPrivilege = false) => {
-    const value = (rawRole || "").trim().toLowerCase();
-    if (hasAdminPrivilege) return "Administrator";
-    if (value === "administrator" || value === "admin") return "Administrator";
-    return "Użytkownik";
+  const normalizeRole = (rawRole) => {
+    return rawRole === "Administrator" ? "Administrator" : "Użytkownik";
   };
 
   useEffect(() => {
@@ -53,22 +44,16 @@ export function AuthProvider({ children }) {
         const userRef = doc(db, "users", firebaseUser.uid);
         const tokenResult = await getIdTokenResult(firebaseUser);
         const hasAdminClaim = tokenResult?.claims?.admin === true;
-        const isEnvAdmin = adminEmails.includes((firebaseUser.email || "").toLowerCase());
-        const isSuperAdmin = SUPER_ADMIN_UIDS.includes(firebaseUser.uid);
-        const hasAdminPrivilege = hasAdminClaim || isEnvAdmin || isSuperAdmin;
-        const desiredRole = hasAdminPrivilege ? "Administrator" : "Użytkownik";
 
         const snap = await getDoc(userRef);
         const baseProfile = {
           firstName: firebaseUser.displayName || "",
-          lastName: "",
-          employeeId: null
+          lastName: ""
         };
 
         if (!snap.exists()) {
-          // Automatycznie utwórz profil użytkownika po pierwszym zalogowaniu.
           const payload = {
-            role: desiredRole,
+            role: hasAdminClaim ? "Administrator" : "Użytkownik",
             email: firebaseUser.email || "",
             ...baseProfile,
             createdAt: serverTimestamp()
@@ -76,54 +61,42 @@ export function AuthProvider({ children }) {
 
           try {
             await setDoc(userRef, payload);
-            setRole(normalizeRole(payload.role, hasAdminPrivilege));
-            setIsAdmin(hasAdminPrivilege);
-            setProfile(baseProfile);
           } catch (createError) {
             console.error("Nie udało się utworzyć profilu użytkownika:", createError);
-            setRole(normalizeRole(desiredRole, hasAdminPrivilege));
-            setIsAdmin(hasAdminPrivilege);
-            setProfile(baseProfile);
           }
+
+          const normalized = normalizeRole(payload.role);
+          setRole(normalized);
+          setIsAdmin(normalized === "Administrator");
+          setProfile(baseProfile);
           setLoading(false);
           return;
         }
 
-        if (snap.exists()) {
-          const data = snap.data();
-          const normalizedRole = normalizeRole(data.role, hasAdminPrivilege);
-          const profileData = {
-            firstName: data.firstName || "",
-            lastName: data.lastName || "",
-            employeeId: data.employeeId || null
-          };
+        const data = snap.data();
+        const normalizedRole = normalizeRole(data.role);
+        const profileData = {
+          firstName: data.firstName || "",
+          lastName: data.lastName || ""
+        };
 
-          // Jeżeli użytkownik jest wskazany jako admin (token lub env), a dokument ma inną rolę
-          // spróbujmy wyrównać rolę w bazie, aby reguły Firestore pozwoliły na zapisy.
-          if (normalizedRole === "Administrator" && data.role !== "Administrator") {
-            try {
-              await setDoc(userRef, { role: "Administrator" }, { merge: true });
-            } catch (syncError) {
-              console.warn("Nie udało się zsynchronizować roli administratora:", syncError);
-            }
+        // Synchronizuj rolę, jeśli w tokenie jest claim admina
+        if (hasAdminClaim && data.role !== "Administrator") {
+          try {
+            await setDoc(userRef, { role: "Administrator" }, { merge: true });
+          } catch (syncError) {
+            console.warn("Nie udało się zapisać roli administratora:", syncError);
           }
-
-          setRole(normalizedRole);
-          setIsAdmin(normalizedRole === "Administrator");
-          setProfile(profileData);
-        } else {
-          // Domyślnie traktujemy jako zwykłego użytkownika lub administratora z listy env/custom claims
-          const normalizedRole = normalizeRole(desiredRole, hasAdminPrivilege);
-          setRole(normalizedRole);
-          setIsAdmin(normalizedRole === "Administrator");
-          setProfile(baseProfile);
         }
+
+        setRole(normalizedRole);
+        setIsAdmin(normalizedRole === "Administrator");
+        setProfile(profileData);
       } catch (error) {
         console.error("Błąd pobierania roli użytkownika:", error);
-        const fallbackIsAdmin = SUPER_ADMIN_UIDS.includes(firebaseUser.uid);
-        setRole(fallbackIsAdmin ? "Administrator" : "Użytkownik");
-        setIsAdmin(fallbackIsAdmin);
-        setProfile({ firstName: firebaseUser.displayName || "", lastName: "", employeeId: null });
+        setRole("Użytkownik");
+        setIsAdmin(false);
+        setProfile({ firstName: "", lastName: "" });
       } finally {
         setLoading(false);
       }

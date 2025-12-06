@@ -5,54 +5,34 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function userRecord() {
+    function userDoc() {
       return isSignedIn()
         ? get(/databases/$(database)/documents/users/$(request.auth.uid))
         : null;
     }
 
-    function isSuperAdmin() {
-      // Stała lista kont nadrzędnych posiadających pełne uprawnienia administratora.
-      return isSignedIn() && request.auth.uid in ["OxYXS3Fp3keHXDoVRCrSXjQ4Te22"];
-    }
-
-    function isAdminRole(roleValue) {
-      return lower(roleValue).matches('^\\s*(administrator|admin)\\s*$');
-    }
-
     function isAdmin() {
-      // Admin jeśli w dokumencie users/{uid} ma rolę (pisownia i białe znaki nie mają znaczenia)
-      // lub gdy ma ustawiony custom claim `admin: true`.
-      let record = userRecord();
+      let record = userDoc();
       let roleValue = record != null && record.exists() && record.data.role is string
-        ? record.data.role
+        ? lower(record.data.role)
         : "";
 
-      return isSuperAdmin() || isAdminRole(roleValue) || (isSignedIn() && request.auth.token.admin == true);
-    }
-
-    function isSelf(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return isSignedIn() && (request.auth.token.admin == true || roleValue == "administrator");
     }
 
     match /users/{userId} {
-      allow read: if isAdmin() || isSelf(userId);
-      allow create: if isSelf(userId);
-      allow update: if isAdmin() || (isSelf(userId) &&
-        request.resource.data.keys().hasOnly(["firstName", "lastName", "employeeId", "role", "email", "createdAt"]) &&
-        request.resource.data.role == resource.data.role);
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSignedIn() && request.auth.uid == userId;
     }
 
     match /employees/{employeeId} {
-      allow read: if isAdmin() || (isSignedIn() && resource != null && resource.data.assignedUserId == request.auth.uid);
+      allow read: if isSignedIn();
       allow create, update, delete: if isAdmin();
     }
 
     match /schedules/{monthId} {
-      allow read: if isAdmin() || (isSignedIn() && (
-        (resource != null && resource.data.viewerIds != null && request.auth.uid in resource.data.viewerIds) ||
-        (request.resource != null && request.resource.data.viewerIds != null && request.auth.uid in request.resource.data.viewerIds)
-      ));
+      allow read: if isSignedIn();
       allow create, update, delete: if isAdmin();
     }
 
