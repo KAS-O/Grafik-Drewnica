@@ -25,6 +25,11 @@ export function AuthProvider({ children }) {
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
 
+  // Stała lista nadrzędnych administratorów (UID), którzy zawsze mają pełne prawa.
+  // Dzięki temu konto o UID "OxYXS3Fp3keHXDoVRCrSXjQ4Te22" działa jako główny admin
+  // nawet bez dodatkowych claimów czy adresów e-mail w zmiennych środowiskowych.
+  const superAdminUids = ["OxYXS3Fp3keHXDoVRCrSXjQ4Te22"];
+
   const normalizeRole = (rawRole, hasAdminPrivilege = false) => {
     const value = (rawRole || "").trim().toLowerCase();
     if (hasAdminPrivilege) return "Administrator";
@@ -53,7 +58,9 @@ export function AuthProvider({ children }) {
         const tokenResult = await getIdTokenResult(firebaseUser);
         const hasAdminClaim = tokenResult?.claims?.admin === true;
         const isEnvAdmin = adminEmails.includes((firebaseUser.email || "").toLowerCase());
-        const desiredRole = hasAdminClaim || isEnvAdmin ? "Administrator" : "Użytkownik";
+        const isSuperAdmin = superAdminUids.includes(firebaseUser.uid);
+        const hasAdminPrivilege = hasAdminClaim || isEnvAdmin || isSuperAdmin;
+        const desiredRole = hasAdminPrivilege ? "Administrator" : "Użytkownik";
 
         const snap = await getDoc(userRef);
         const baseProfile = {
@@ -73,13 +80,13 @@ export function AuthProvider({ children }) {
 
           try {
             await setDoc(userRef, payload);
-            setRole(normalizeRole(payload.role, desiredRole === "Administrator"));
-            setIsAdmin(payload.role === "Administrator");
+            setRole(normalizeRole(payload.role, hasAdminPrivilege));
+            setIsAdmin(hasAdminPrivilege);
             setProfile(baseProfile);
           } catch (createError) {
             console.error("Nie udało się utworzyć profilu użytkownika:", createError);
-            setRole(normalizeRole(desiredRole, hasAdminClaim || isEnvAdmin));
-            setIsAdmin(desiredRole === "Administrator");
+            setRole(normalizeRole(desiredRole, hasAdminPrivilege));
+            setIsAdmin(hasAdminPrivilege);
             setProfile(baseProfile);
           }
           setLoading(false);
@@ -88,7 +95,7 @@ export function AuthProvider({ children }) {
 
         if (snap.exists()) {
           const data = snap.data();
-          const normalizedRole = normalizeRole(data.role, hasAdminClaim || isEnvAdmin);
+          const normalizedRole = normalizeRole(data.role, hasAdminPrivilege);
           const profileData = {
             firstName: data.firstName || "",
             lastName: data.lastName || "",
@@ -110,7 +117,7 @@ export function AuthProvider({ children }) {
           setProfile(profileData);
         } else {
           // Domyślnie traktujemy jako zwykłego użytkownika lub administratora z listy env/custom claims
-          const normalizedRole = normalizeRole(desiredRole, hasAdminClaim || isEnvAdmin);
+          const normalizedRole = normalizeRole(desiredRole, hasAdminPrivilege);
           setRole(normalizedRole);
           setIsAdmin(normalizedRole === "Administrator");
           setProfile(baseProfile);
