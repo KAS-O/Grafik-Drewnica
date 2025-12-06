@@ -1,7 +1,5 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import {
   addDoc,
@@ -11,17 +9,70 @@ import {
   getDocs,
   getFirestore,
   serverTimestamp,
-  setDoc
+  setDoc,
+  type DocumentData,
+  type Firestore,
+  type Timestamp
 } from "firebase/firestore";
-import { auth, app } from "../../lib/firebase";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useAuth } from "../../context/AuthContext";
+import { app, auth } from "../../lib/firebase";
 
 const POSITIONS = [
   "Pielęgniarka / Pielęgniarz",
   "Opiekun Medyczny",
   "Sanitariusz",
   "Salowa"
-];
+] as const;
+
+type Position = (typeof POSITIONS)[number];
+
+type ShiftValue = "D" | "N" | "";
+
+interface Employee {
+  id: string;
+  firstName: string;
+  lastName: string;
+  position: Position | string;
+  createdAt?: Timestamp | null;
+}
+
+interface EmployeeFormState {
+  firstName: string;
+  lastName: string;
+  position: Position;
+}
+
+interface ScheduleEntry {
+  shifts: Record<number, ShiftValue>;
+  fullName: string;
+  position: string;
+}
+
+interface DayInfo {
+  dayNumber: number;
+  weekday: number;
+  label: string;
+  tone: string;
+  isSaturday: boolean;
+  isSundayOrHoliday: boolean;
+}
+
+interface StatusMessage {
+  type: "error" | "success" | "";
+  text: string;
+}
+
+interface FirestoreScheduleEntry {
+  shifts?: Record<string, ShiftValue>;
+  fullName?: string;
+  position?: string;
+}
+
+type FirestoreScheduleEntries = Record<string, FirestoreScheduleEntry | undefined>;
+
+type ScheduleEntries = Record<string, ScheduleEntry>;
 
 const WEEKDAYS = [
   "Niedziela",
@@ -45,17 +96,17 @@ const POLISH_HOLIDAYS = new Set([
   "12-26"
 ]);
 
-function getMonthKey(date) {
+function getMonthKey(date: Date): string {
   const year = date.getFullYear();
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   return `${year}-${month}`;
 }
 
-function getMonthLabel(date) {
+function getMonthLabel(date: Date): string {
   return date.toLocaleDateString("pl-PL", { month: "long", year: "numeric" });
 }
 
-function buildDays(date) {
+function buildDays(date: Date): DayInfo[] {
   const year = date.getFullYear();
   const month = date.getMonth();
   const total = new Date(year, month + 1, 0).getDate();
@@ -83,18 +134,34 @@ function buildDays(date) {
       tone,
       isSaturday,
       isSundayOrHoliday
-    };
+    } satisfies DayInfo;
   });
 }
 
-function mergeEntriesWithEmployees(entries, employees) {
-  const combined = {};
+function normalizeShiftValue(value: unknown): ShiftValue {
+  if (value === "D" || value === "N") return value;
+  return "";
+}
+
+function mergeEntriesWithEmployees(entries: FirestoreScheduleEntries, employees: Employee[]): ScheduleEntries {
+  const combined: ScheduleEntries = {};
 
   employees.forEach((employee) => {
     const key = employee.id;
     const existing = entries[key] || { shifts: {} };
+    const normalizedShifts = Object.entries(existing.shifts ?? {}).reduce<Record<number, ShiftValue>>(
+      (acc, [dayKey, shiftValue]) => {
+        const parsed = Number(dayKey);
+        if (!Number.isNaN(parsed)) {
+          acc[parsed] = normalizeShiftValue(shiftValue);
+        }
+        return acc;
+      },
+      {}
+    );
+
     combined[key] = {
-      shifts: existing.shifts || {},
+      shifts: normalizedShifts,
       fullName: `${employee.firstName} ${employee.lastName}`.trim(),
       position: employee.position || ""
     };
@@ -103,13 +170,13 @@ function mergeEntriesWithEmployees(entries, employees) {
   return combined;
 }
 
-function cycleShiftValue(current) {
+function cycleShiftValue(current: ShiftValue): ShiftValue {
   if (current === "D") return "N";
   if (current === "N") return "";
   return "D";
 }
 
-function getDayCellClasses(day, isEditable = false) {
+function getDayCellClasses(day: DayInfo, isEditable = false): string {
   const padding = isEditable ? "px-1.5 py-1" : "px-2 py-2";
 
   if (day.isSundayOrHoliday) {
@@ -126,20 +193,20 @@ function getDayCellClasses(day, isEditable = false) {
 export default function DashboardPage() {
   const router = useRouter();
   const { user, loading, isAdmin, role } = useAuth();
-  const [currentMonth, setCurrentMonth] = useState(() => new Date());
-  const [employees, setEmployees] = useState([]);
-  const [scheduleEntries, setScheduleEntries] = useState({});
-  const [loadingData, setLoadingData] = useState(false);
-  const [scheduleSaving, setScheduleSaving] = useState(false);
-  const [scheduleDirty, setScheduleDirty] = useState(false);
-  const [status, setStatus] = useState({ type: "", text: "" });
-  const [employeeForm, setEmployeeForm] = useState({
+  const [currentMonth, setCurrentMonth] = useState<Date>(() => new Date());
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [scheduleEntries, setScheduleEntries] = useState<ScheduleEntries>({});
+  const [loadingData, setLoadingData] = useState<boolean>(false);
+  const [scheduleSaving, setScheduleSaving] = useState<boolean>(false);
+  const [scheduleDirty, setScheduleDirty] = useState<boolean>(false);
+  const [status, setStatus] = useState<StatusMessage>({ type: "", text: "" });
+  const [employeeForm, setEmployeeForm] = useState<EmployeeFormState>({
     firstName: "",
     lastName: "",
     position: POSITIONS[0]
   });
-  const [formPending, setFormPending] = useState(false);
-  const db = useMemo(() => getFirestore(app), []);
+  const [formPending, setFormPending] = useState<boolean>(false);
+  const db: Firestore = useMemo(() => getFirestore(app), []);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -159,12 +226,17 @@ export default function DashboardPage() {
 
       try {
         const employeesSnap = await getDocs(collection(db, "employees"));
-        const employeeList = employeesSnap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+        const employeeList: Employee[] = employeesSnap.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...(docSnap.data() as DocumentData)
+        })) as Employee[];
         setEmployees(employeeList);
 
         const scheduleRef = doc(db, "schedules", monthId);
         const scheduleSnap = await getDoc(scheduleRef);
-        const loadedEntries = scheduleSnap.exists() ? scheduleSnap.data().entries || {} : {};
+        const loadedEntries: FirestoreScheduleEntries = scheduleSnap.exists()
+          ? ((scheduleSnap.data().entries as FirestoreScheduleEntries) || {})
+          : {};
 
         setScheduleEntries(mergeEntriesWithEmployees(loadedEntries, employeeList));
         setScheduleDirty(false);
@@ -178,7 +250,7 @@ export default function DashboardPage() {
       }
     };
 
-    load();
+    void load();
   }, [user, monthId, db]);
 
   const handleLogout = async () => {
@@ -190,7 +262,7 @@ export default function DashboardPage() {
     }
   };
 
-  const handleMonthChange = (direction) => {
+  const handleMonthChange = (direction: number) => {
     setCurrentMonth((prev) => {
       const next = new Date(prev);
       next.setMonth(prev.getMonth() + direction);
@@ -198,7 +270,7 @@ export default function DashboardPage() {
     });
   };
 
-  const handleAddEmployee = async (e) => {
+  const handleAddEmployee = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setStatus({ type: "", text: "" });
 
@@ -227,7 +299,7 @@ export default function DashboardPage() {
       };
 
       const ref = await addDoc(collection(db, "employees"), payload);
-      const newEmployee = { id: ref.id, ...payload };
+      const newEmployee: Employee = { id: ref.id, ...payload };
 
       setEmployees((prev) => [...prev, newEmployee]);
       setScheduleEntries((prev) => ({
@@ -248,12 +320,12 @@ export default function DashboardPage() {
     }
   };
 
-  const handleToggleShift = (employeeId, dayNumber) => {
+  const handleToggleShift = (employeeId: string, dayNumber: number) => {
     if (!isAdmin) return;
 
     setScheduleEntries((prev) => {
       const current = prev[employeeId] || { shifts: {} };
-      const currentValue = current.shifts?.[dayNumber] || "";
+      const currentValue = current.shifts?.[dayNumber] ?? "";
       const nextValue = cycleShiftValue(currentValue);
       setScheduleDirty(true);
       return {
@@ -396,7 +468,7 @@ export default function DashboardPage() {
                       </td>
                       {days.map((day) => {
                         const entry = scheduleEntries[employee.id];
-                        const value = entry?.shifts?.[day.dayNumber] || "";
+                        const value = entry?.shifts?.[day.dayNumber] ?? "";
                         const tone =
                           value === "D"
                             ? "bg-amber-300/90 text-slate-950"
@@ -512,7 +584,7 @@ export default function DashboardPage() {
                     <label className="text-xs uppercase tracking-wide text-sky-200">Stanowisko</label>
                     <select
                       value={employeeForm.position}
-                      onChange={(e) => setEmployeeForm((prev) => ({ ...prev, position: e.target.value }))}
+                      onChange={(e) => setEmployeeForm((prev) => ({ ...prev, position: e.target.value as Position }))}
                       className="w-full rounded-xl border border-sky-300/40 bg-slate-950/40 px-3 py-2 text-sm text-sky-50 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-400/70"
                     >
                       {POSITIONS.map((pos) => (

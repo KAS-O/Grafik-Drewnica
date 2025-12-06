@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FirebaseError } from "firebase/app";
 import { signInWithEmailAndPassword } from "firebase/auth";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, type FormEvent } from "react";
 import { auth } from "../lib/firebase";
 import { useAuth } from "../context/AuthContext";
 
@@ -10,10 +11,10 @@ export default function LoginPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
 
-  const [login, setLogin] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [pending, setPending] = useState(false);
+  const [login, setLogin] = useState<string>("");
+  const [password, setPassword] = useState<string>("");
+  const [error, setError] = useState<string>("");
+  const [pending, setPending] = useState<boolean>(false);
 
   useEffect(() => {
     if (!loading && user) {
@@ -21,7 +22,7 @@ export default function LoginPage() {
     }
   }, [user, loading, router]);
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError("");
     setPending(true);
@@ -31,10 +32,12 @@ export default function LoginPage() {
     } catch (err) {
       console.error(err);
       let message = "Logowanie nie powiodło się. Sprawdź dane i spróbuj ponownie.";
-      if (err?.code === "auth/invalid-email") {
+      const errorCode = err instanceof FirebaseError ? err.code : null;
+
+      if (errorCode === "auth/invalid-email") {
         message = "Nieprawidłowy format loginu (email).";
       }
-      if (err?.code === "auth/user-not-found" || err?.code === "auth/wrong-password") {
+      if (errorCode === "auth/user-not-found" || errorCode === "auth/wrong-password") {
         message = "Nieprawidłowy login lub hasło.";
       }
       setError(message);
