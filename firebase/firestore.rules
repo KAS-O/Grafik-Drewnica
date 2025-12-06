@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userRecord() {
+      return isSignedIn()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid))
+        : null;
+    }
+
+    function isAdmin() {
+      return userRecord() != null && userRecord().exists() && userRecord().data.role == "Administrator";
+    }
+
+    function isSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      allow read: if isAdmin() || isSelf(userId);
+      allow write: if isAdmin() || (isSelf(userId) &&
+        request.resource.data.keys().hasOnly(["firstName", "lastName", "employeeId", "role", "email"]) &&
+        request.resource.data.role == "Użytkownik");
+    }
+
+    match /employees/{employeeId} {
+      allow read: if isAdmin() || (isSignedIn() && resource != null && resource.data.assignedUserId == request.auth.uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /schedules/{monthId} {
+      allow read: if isAdmin() || (isSignedIn() && (
+        (resource != null && resource.data.viewerIds != null && request.auth.uid in resource.data.viewerIds) ||
+        (request.resource != null && request.resource.data.viewerIds != null && request.auth.uid in request.resource.data.viewerIds)
+      ));
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

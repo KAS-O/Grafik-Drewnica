@@ -65,7 +65,7 @@ export default function LoginPage() {
           <div className="grid gap-4 text-sm text-sky-100/80 md:grid-cols-2">
             <div className="glass-panel rounded-2xl p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-sky-300">
-                Rola: <span className="text-sky-100">„*”</span>
+                Rola: <span className="text-sky-100">Użytkownik</span>
               </p>
               <p className="mt-2 text-xs md:text-sm">
                 Dostęp tylko do własnego grafiku i swoich danych.
@@ -151,7 +151,7 @@ export default function LoginPage() {
             </form>
 
             <p className="mt-4 text-[11px] leading-relaxed text-sky-100/70">
-              Konta użytkowników oraz role (<span className="font-semibold">„*”</span>,
+              Konta użytkowników oraz role (<span className="font-semibold">Użytkownik</span>,
               <span className="font-semibold"> Administrator</span>) konfigurujesz w{" "}
               <span className="font-semibold">Firebase Console</span> w kolekcji{" "}
               <code className="rounded bg-slate-900/60 px-1">users</code>.
