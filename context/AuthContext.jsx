@@ -9,7 +9,8 @@ const AuthContext = createContext({
   user: null,
   role: null,
   profile: null,
-  loading: true
+  loading: true,
+  isAdmin: false
 });
 
 export function AuthProvider({ children }) {
@@ -17,6 +18,7 @@ export function AuthProvider({ children }) {
   const [role, setRole] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const normalizeRole = (rawRole, hasAdminClaim = false) => {
     const value = (rawRole || "").trim().toLowerCase();
@@ -33,6 +35,7 @@ export function AuthProvider({ children }) {
         setUser(null);
         setRole(null);
         setProfile(null);
+        setIsAdmin(false);
         setLoading(false);
         return;
       }
@@ -48,7 +51,9 @@ export function AuthProvider({ children }) {
 
         if (snap.exists()) {
           const data = snap.data();
-          setRole(normalizeRole(data.role, hasAdminClaim));
+          const normalizedRole = normalizeRole(data.role, hasAdminClaim);
+          setRole(normalizedRole);
+          setIsAdmin(normalizedRole === "Administrator");
           setProfile({
             firstName: data.firstName || "",
             lastName: data.lastName || "",
@@ -56,12 +61,15 @@ export function AuthProvider({ children }) {
           });
         } else {
           // Domyślnie traktujemy jako zwykłego użytkownika
-          setRole(normalizeRole(null, hasAdminClaim));
+          const normalizedRole = normalizeRole(null, hasAdminClaim);
+          setRole(normalizedRole);
+          setIsAdmin(normalizedRole === "Administrator");
           setProfile({ firstName: firebaseUser.displayName || "", lastName: "", employeeId: null });
         }
       } catch (error) {
         console.error("Błąd pobierania roli użytkownika:", error);
         setRole("Użytkownik");
+        setIsAdmin(false);
         setProfile({ firstName: firebaseUser.displayName || "", lastName: "", employeeId: null });
       } finally {
         setLoading(false);
@@ -72,7 +80,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, role, profile, loading }}>
+    <AuthContext.Provider value={{ user, role, profile, loading, isAdmin }}>
       {children}
     </AuthContext.Provider>
   );
