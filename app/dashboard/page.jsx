@@ -128,21 +128,29 @@ function cycleShiftValue(current) {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user, role, profile, loading } = useAuth();
+  const { user, role, profile, loading, isAdmin } = useAuth();
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(() => new Date());
   const [employees, setEmployees] = useState([]);
   const [scheduleEntries, setScheduleEntries] = useState({});
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleDirty, setScheduleDirty] = useState(false);
   const [employeeForm, setEmployeeForm] = useState({
     firstName: "",
     lastName: "",
     position: POSITIONS[0]
   });
   const [assignmentForm, setAssignmentForm] = useState({ employeeId: "", accountEmail: "" });
-  const [statusMessage, setStatusMessage] = useState("");
+  const [adminNotice, setAdminNotice] = useState({ type: "", text: "" });
+  const [formPending, setFormPending] = useState(false);
   const db = useMemo(() => getFirestore(app), []);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setAdminPanelOpen(false);
+    }
+  }, [isAdmin]);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -150,7 +158,6 @@ export default function DashboardPage() {
     }
   }, [loading, user, router]);
 
-  const isAdmin = role === "Administrator";
   const monthId = useMemo(() => getMonthKey(currentMonth), [currentMonth]);
   const days = useMemo(() => buildDays(currentMonth), [currentMonth]);
 
@@ -196,9 +203,11 @@ export default function DashboardPage() {
         const loadedEntries = scheduleSnap.exists() ? scheduleSnap.data().entries || {} : {};
         const synced = mergeEntriesWithEmployees(loadedEntries, employees);
         setScheduleEntries(synced);
+        setScheduleDirty(false);
       } catch (error) {
         console.error("Błąd pobierania grafiku:", error);
         setScheduleEntries(mergeEntriesWithEmployees({}, employees));
+        setScheduleDirty(false);
       } finally {
         setScheduleLoading(false);
       }
@@ -226,22 +235,26 @@ export default function DashboardPage() {
 
   const handleAddEmployee = async (e) => {
     e.preventDefault();
-    setStatusMessage("");
+    setAdminNotice({ type: "", text: "" });
 
     if (!isAdmin) {
-      setStatusMessage("Tylko administrator może dodawać pracowników.");
+      setAdminNotice({ type: "error", text: "Tylko administrator może dodawać pracowników." });
       return;
     }
+
+    if (formPending) return;
 
     const trimmedFirst = employeeForm.firstName.trim();
     const trimmedLast = employeeForm.lastName.trim();
 
     if (!trimmedFirst || !trimmedLast) {
-      setStatusMessage("Uzupełnij imię i nazwisko.");
+      setAdminNotice({ type: "error", text: "Uzupełnij imię i nazwisko." });
       return;
     }
 
     try {
+      setFormPending(true);
+
       const payload = {
         firstName: trimmedFirst,
         lastName: trimmedLast,
@@ -252,20 +265,34 @@ export default function DashboardPage() {
       };
 
       const ref = await addDoc(collection(db, "employees"), payload);
-      setEmployees((prev) => [...prev, { id: ref.id, ...payload }]);
+      const newEmployee = { id: ref.id, ...payload };
+
+      setEmployees((prev) => [...prev, newEmployee]);
+      setScheduleEntries((prev) => ({
+        ...prev,
+        [ref.id]: { shifts: {}, fullName: `${trimmedFirst} ${trimmedLast}`.trim(), position: employeeForm.position, userId: null }
+      }));
       setEmployeeForm({ firstName: "", lastName: "", position: POSITIONS[0] });
       setAssignmentForm((prev) => ({ ...prev, employeeId: ref.id }));
-      setStatusMessage("Dodano nowego pracownika.");
+      setAdminPanelOpen(true);
+      setAdminNotice({ type: "success", text: "Dodano nowego pracownika." });
     } catch (error) {
       console.error("Nie udało się dodać pracownika:", error);
-      setStatusMessage("Nie udało się dodać pracownika. Sprawdź uprawnienia.");
+      setAdminNotice({ type: "error", text: "Nie udało się dodać pracownika. Sprawdź uprawnienia." });
+    } finally {
+      setFormPending(false);
     }
   };
 
   const handleAssignAccount = async (e) => {
     e.preventDefault();
     if (!assignmentForm.employeeId || !assignmentForm.accountEmail) return;
-    setStatusMessage("");
+    setAdminNotice({ type: "", text: "" });
+
+    if (!isAdmin) {
+      setAdminNotice({ type: "error", text: "Tylko administrator może przypisywać konta." });
+      return;
+    }
 
     try {
       const userQuery = query(
@@ -275,7 +302,7 @@ export default function DashboardPage() {
       const userSnapshot = await getDocs(userQuery);
 
       if (userSnapshot.empty) {
-        setStatusMessage("Nie znaleziono konta o podanym adresie e-mail.");
+        setAdminNotice({ type: "error", text: "Nie znaleziono konta o podanym adresie e-mail." });
         return;
       }
 
@@ -303,18 +330,21 @@ export default function DashboardPage() {
         )
       );
 
-      setStatusMessage("Przypisano konto do pracownika.");
+      setAdminNotice({ type: "success", text: "Przypisano konto do pracownika." });
     } catch (error) {
       console.error("Nie udało się przypisać konta:", error);
-      setStatusMessage("Nie udało się przypisać konta. Upewnij się, że masz uprawnienia administratora.");
+      setAdminNotice({ type: "error", text: "Nie udało się przypisać konta. Upewnij się, że masz uprawnienia administratora." });
     }
   };
 
   const handleToggleShift = (employeeId, dayNumber) => {
+    if (!isAdmin) return;
+
     setScheduleEntries((prev) => {
       const current = prev[employeeId] || { shifts: {} };
       const currentValue = current.shifts?.[dayNumber] || "";
       const nextValue = cycleShiftValue(currentValue);
+      setScheduleDirty(true);
       return {
         ...prev,
         [employeeId]: {
@@ -326,8 +356,13 @@ export default function DashboardPage() {
   };
 
   const handleSaveSchedule = async () => {
+    if (!isAdmin) {
+      setAdminNotice({ type: "error", text: "Tylko administrator może zapisywać grafik." });
+      return;
+    }
+
     setScheduleSaving(true);
-    setStatusMessage("");
+    setAdminNotice({ type: "", text: "" });
 
     try {
       const viewerIds = Object.values(scheduleEntries)
@@ -346,10 +381,11 @@ export default function DashboardPage() {
         { merge: true }
       );
 
-      setStatusMessage("Grafik zapisany.");
+      setScheduleDirty(false);
+      setAdminNotice({ type: "success", text: "Grafik zapisany." });
     } catch (error) {
       console.error("Nie udało się zapisać grafiku:", error);
-      setStatusMessage("Nie udało się zapisać grafiku.");
+      setAdminNotice({ type: "error", text: "Nie udało się zapisać grafiku." });
     } finally {
       setScheduleSaving(false);
     }
@@ -551,9 +587,15 @@ export default function DashboardPage() {
                   Kliknij kafelek dnia, aby przełączać pomiędzy dyżurem dziennym (D), nocnym (N) albo pustym polem.
                 </p>
               </div>
-              {statusMessage && (
-                <span className="rounded-full border border-rose-300/50 bg-rose-500/20 px-3 py-1 text-[11px] font-medium text-rose-50">
-                  {statusMessage}
+              {adminNotice.text && (
+                <span
+                  className={`rounded-full border px-3 py-1 text-[11px] font-medium ${
+                    adminNotice.type === "error"
+                      ? "border-red-300/60 bg-red-500/20 text-red-50"
+                      : "border-emerald-300/60 bg-emerald-500/20 text-emerald-50"
+                  }`}
+                >
+                  {adminNotice.text}
                 </span>
               )}
             </div>
@@ -597,9 +639,10 @@ export default function DashboardPage() {
                 </div>
                 <button
                   type="submit"
-                  className="mt-4 w-full rounded-xl bg-gradient-to-r from-rose-500 via-amber-400 to-rose-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110"
+                  disabled={formPending}
+                  className="mt-4 w-full rounded-xl bg-gradient-to-r from-rose-500 via-amber-400 to-rose-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-wait disabled:opacity-80"
                 >
-                  Dodaj pracownika
+                  {formPending ? "Dodawanie..." : "Dodaj pracownika"}
                 </button>
               </form>
 
@@ -685,13 +728,20 @@ export default function DashboardPage() {
 
             <div className="mt-6 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-rose-50">Tabela edycji grafiku (poziomo)</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-rose-50">Tabela edycji grafiku (poziomo)</h3>
+                  {scheduleDirty && (
+                    <span className="rounded-full border border-amber-300/60 bg-amber-500/20 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-50">
+                      Niezapisane zmiany
+                    </span>
+                  )}
+                </div>
                 <button
                   onClick={handleSaveSchedule}
-                  disabled={scheduleSaving}
-                  className="rounded-xl bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-wait disabled:opacity-75"
+                  disabled={scheduleSaving || !scheduleDirty}
+                  className="rounded-xl bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {scheduleSaving ? "Zapisywanie..." : "Zapisz grafik"}
+                  {scheduleSaving ? "Zapisywanie..." : scheduleDirty ? "Zapisz grafik" : "Brak zmian"}
                 </button>
               </div>
 
