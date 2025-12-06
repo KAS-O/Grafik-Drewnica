@@ -15,6 +15,7 @@ import {
 } from "firebase/firestore";
 import { auth, app } from "../../lib/firebase";
 import { useAuth } from "../../context/AuthContext";
+import { SUPER_ADMIN_UIDS } from "../../lib/admin";
 
 const POSITIONS = [
   "Pielęgniarka / Pielęgniarz",
@@ -125,7 +126,7 @@ function cycleShiftValue(current) {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user, role, profile, loading, isAdmin } = useAuth();
+  const { user, profile, loading, isAdmin } = useAuth();
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(() => new Date());
   const [employees, setEmployees] = useState([]);
@@ -142,13 +143,18 @@ export default function DashboardPage() {
   const [formPending, setFormPending] = useState(false);
   const db = useMemo(() => getFirestore(app), []);
 
+  const effectiveIsAdmin = useMemo(
+    () => !!(isAdmin || (user && SUPER_ADMIN_UIDS.includes(user.uid))),
+    [isAdmin, user]
+  );
+
   useEffect(() => {
-    if (isAdmin) {
+    if (effectiveIsAdmin) {
       setAdminPanelOpen(true);
     } else {
       setAdminPanelOpen(false);
     }
-  }, [isAdmin]);
+  }, [effectiveIsAdmin]);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -164,7 +170,7 @@ export default function DashboardPage() {
 
     const fetchEmployees = async () => {
       try {
-        if (isAdmin) {
+        if (effectiveIsAdmin) {
           const snapshot = await getDocs(collection(db, "employees"));
           const list = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
           setEmployees(list);
@@ -184,7 +190,7 @@ export default function DashboardPage() {
     };
 
     fetchEmployees();
-  }, [user, isAdmin, profile?.employeeId, db]);
+  }, [user, effectiveIsAdmin, profile?.employeeId, db]);
 
   useEffect(() => {
     if (!user) return;
@@ -232,7 +238,7 @@ export default function DashboardPage() {
     e.preventDefault();
     setAdminNotice({ type: "", text: "" });
 
-    if (!isAdmin) {
+    if (!effectiveIsAdmin) {
       setAdminNotice({ type: "error", text: "Tylko administrator może dodawać pracowników." });
       return;
     }
@@ -283,7 +289,7 @@ export default function DashboardPage() {
   };
 
   const handleToggleShift = (employeeId, dayNumber) => {
-    if (!isAdmin) return;
+    if (!effectiveIsAdmin) return;
 
     setScheduleEntries((prev) => {
       const current = prev[employeeId] || { shifts: {} };
@@ -301,7 +307,7 @@ export default function DashboardPage() {
   };
 
   const handleSaveSchedule = async () => {
-    if (!isAdmin) {
+    if (!effectiveIsAdmin) {
       setAdminNotice({ type: "error", text: "Tylko administrator może zapisywać grafik." });
       return;
     }
@@ -343,7 +349,7 @@ export default function DashboardPage() {
     );
   }, [employees, user, profile?.employeeId]);
 
-  const visibleEmployees = isAdmin ? employees : personalEmployee ? [personalEmployee] : [];
+  const visibleEmployees = effectiveIsAdmin ? employees : personalEmployee ? [personalEmployee] : [];
 
   const fullName = useMemo(() => {
     if (profile?.firstName || profile?.lastName) {
@@ -382,7 +388,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            {isAdmin && (
+            {effectiveIsAdmin && (
               <button
                 onClick={() => setAdminPanelOpen((prev) => !prev)}
                 className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
@@ -398,13 +404,13 @@ export default function DashboardPage() {
 
             <span
               className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${
-                isAdmin
+                effectiveIsAdmin
                   ? "border-rose-300/70 bg-rose-500/10 text-rose-50"
                   : "border-sky-400/60 bg-sky-400/10 text-sky-100"
               }`}
             >
               <span className="h-1.5 w-1.5 rounded-full bg-current" />
-              {isAdmin ? "Administrator" : "Użytkownik"}
+              {effectiveIsAdmin ? "Administrator" : "Użytkownik"}
             </span>
 
             <button
@@ -503,7 +509,7 @@ export default function DashboardPage() {
                           key={`${employee.id}-day-${day.dayNumber}`}
                           className={`${getDayCellClasses(day)} text-center align-middle`}
                         >
-                          {isAdmin ? (
+                          {effectiveIsAdmin ? (
                             <button
                               type="button"
                               onClick={() => handleToggleShift(employee.id, day.dayNumber)}
@@ -535,7 +541,7 @@ export default function DashboardPage() {
           </div>
         </section>
         {/* Panel administratora */}
-        {isAdmin && adminPanelOpen && (
+        {effectiveIsAdmin && adminPanelOpen && (
           <section className="rounded-3xl border-2 border-rose-400/40 bg-gradient-to-br from-rose-950/70 via-slate-950 to-slate-950 p-5 md:p-6 shadow-xl shadow-rose-500/20">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>

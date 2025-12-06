@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { getIdTokenResult, onAuthStateChanged } from "firebase/auth";
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { app, auth } from "../lib/firebase";
+import { SUPER_ADMIN_UIDS } from "../lib/admin";
 
 const AuthContext = createContext({
   user: null,
@@ -24,11 +25,6 @@ export function AuthProvider({ children }) {
     .split(",")
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
-
-  // Stała lista nadrzędnych administratorów (UID), którzy zawsze mają pełne prawa.
-  // Dzięki temu konto o UID "OxYXS3Fp3keHXDoVRCrSXjQ4Te22" działa jako główny admin
-  // nawet bez dodatkowych claimów czy adresów e-mail w zmiennych środowiskowych.
-  const superAdminUids = ["OxYXS3Fp3keHXDoVRCrSXjQ4Te22"];
 
   const normalizeRole = (rawRole, hasAdminPrivilege = false) => {
     const value = (rawRole || "").trim().toLowerCase();
@@ -58,7 +54,7 @@ export function AuthProvider({ children }) {
         const tokenResult = await getIdTokenResult(firebaseUser);
         const hasAdminClaim = tokenResult?.claims?.admin === true;
         const isEnvAdmin = adminEmails.includes((firebaseUser.email || "").toLowerCase());
-        const isSuperAdmin = superAdminUids.includes(firebaseUser.uid);
+        const isSuperAdmin = SUPER_ADMIN_UIDS.includes(firebaseUser.uid);
         const hasAdminPrivilege = hasAdminClaim || isEnvAdmin || isSuperAdmin;
         const desiredRole = hasAdminPrivilege ? "Administrator" : "Użytkownik";
 
@@ -124,8 +120,9 @@ export function AuthProvider({ children }) {
         }
       } catch (error) {
         console.error("Błąd pobierania roli użytkownika:", error);
-        setRole("Użytkownik");
-        setIsAdmin(false);
+        const fallbackIsAdmin = SUPER_ADMIN_UIDS.includes(firebaseUser.uid);
+        setRole(fallbackIsAdmin ? "Administrator" : "Użytkownik");
+        setIsAdmin(fallbackIsAdmin);
         setProfile({ firstName: firebaseUser.displayName || "", lastName: "", employeeId: null });
       } finally {
         setLoading(false);
