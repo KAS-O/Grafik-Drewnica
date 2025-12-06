@@ -32,9 +32,10 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isAdmin() || isSelf(userId);
-      allow write: if isAdmin() || (isSelf(userId) &&
-        request.resource.data.keys().hasOnly(["firstName", "lastName", "employeeId", "role", "email"]) &&
-        request.resource.data.role == "Użytkownik");
+      allow create: if isSelf(userId);
+      allow update: if isAdmin() || (isSelf(userId) &&
+        request.resource.data.keys().hasOnly(["firstName", "lastName", "employeeId", "role", "email", "createdAt"]) &&
+        request.resource.data.role == resource.data.role);
     }
 
     match /employees/{employeeId} {

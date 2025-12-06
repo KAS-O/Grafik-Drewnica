@@ -268,7 +268,6 @@ export default function DashboardPage() {
         [ref.id]: { shifts: {}, fullName: `${trimmedFirst} ${trimmedLast}`.trim(), position: employeeForm.position, userId: null }
       }));
       setEmployeeForm({ firstName: "", lastName: "", position: POSITIONS[0] });
-      setAssignmentForm((prev) => ({ ...prev, employeeId: ref.id }));
       setAdminPanelOpen(true);
       setAdminNotice({ type: "success", text: "Dodano nowego pracownika." });
     } catch (error) {
