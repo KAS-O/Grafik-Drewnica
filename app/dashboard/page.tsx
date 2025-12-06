@@ -342,6 +342,12 @@ export default function DashboardPage() {
             <h1 className="text-2xl font-semibold">Grafik Drewnica</h1>
           </div>
           <div className="flex items-center gap-3 text-sm font-semibold">
+            <a
+              href="#panel-administracji"
+              className="rounded-full border border-rose-400/60 bg-rose-900/60 px-3 py-1.5 text-xs font-semibold text-rose-50 shadow-inner transition hover:bg-rose-700/60"
+            >
+              Panel Administracji
+            </a>
             <span className="rounded-full border border-sky-400/60 bg-sky-400/10 px-3 py-1 text-sky-100">{role || "--"}</span>
             <button
               onClick={handleLogout}
@@ -364,6 +370,115 @@ export default function DashboardPage() {
           </div>
         )}
 
+        <section
+          id="panel-administracji"
+          className="rounded-3xl border border-rose-400/30 bg-gradient-to-r from-rose-950 via-rose-900/60 to-slate-950 p-5 text-rose-50 shadow-xl"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="space-y-2">
+              <div className="inline-flex items-center gap-2 rounded-full border border-rose-300/40 bg-rose-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-rose-100">
+                <span className="h-2 w-2 rounded-full bg-rose-400 shadow-neon" />
+                Panel Administracji
+              </div>
+              <div className="space-y-1">
+                <h2 className="text-lg font-semibold text-rose-50">Zarządzanie grafikiem</h2>
+                <p className="max-w-3xl text-sm text-rose-100/80">
+                  Dodawaj pracowników oraz edytuj miesięczny grafik w jednym miejscu. Poniżej znajdziesz formularz
+                  dodawania pracowników oraz szybki skrót do sekcji edycji grafiku.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+              <a
+                href="#grafik"
+                className="rounded-full border border-rose-300/60 bg-rose-200/20 px-4 py-2 text-rose-50 transition hover:bg-rose-200/40"
+              >
+                Edytuj grafik
+              </a>
+              <span className="rounded-full border border-emerald-400/50 bg-emerald-500/10 px-3 py-1 text-emerald-100">
+                {isAdmin ? "Administrator" : "Podgląd"}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+            <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Dodawanie pracowników</h3>
+              {isAdmin ? (
+                <form onSubmit={handleAddEmployee} className="mt-3 space-y-4">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-rose-100">Imię</label>
+                      <input
+                        type="text"
+                        value={employeeForm.firstName}
+                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, firstName: e.target.value }))}
+                        className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-rose-100">Nazwisko</label>
+                      <input
+                        type="text"
+                        value={employeeForm.lastName}
+                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, lastName: e.target.value }))}
+                        className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs uppercase tracking-wide text-rose-100">Stanowisko</label>
+                    <select
+                      value={employeeForm.position}
+                      onChange={(e) => setEmployeeForm((prev) => ({ ...prev, position: e.target.value as Position }))}
+                      className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                    >
+                      {POSITIONS.map((pos) => (
+                        <option key={pos} value={pos} className="bg-slate-900">
+                          {pos}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={formPending}
+                    className="w-full rounded-2xl bg-gradient-to-r from-rose-400 via-rose-500 to-rose-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {formPending ? "Dodawanie..." : "Dodaj pracownika"}
+                  </button>
+                </form>
+              ) : (
+                <p className="mt-2 text-sm text-rose-100/80">
+                  Panel administracyjny jest dostępny tylko dla administratorów. Poproś o dostęp, aby dodawać pracowników i edytować grafik.
+                </p>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Edycja grafiku</h3>
+              <p className="mt-2 text-sm text-rose-100/80">
+                W sekcji grafiku możesz klikać w pola dyżurów, aby zmieniać wartości oraz zapisać całość w Firestore.
+              </p>
+              <div className="mt-3 flex flex-col gap-2 text-xs text-rose-100/80">
+                <span className="inline-flex items-center gap-2 rounded-lg border border-rose-200/40 bg-rose-200/10 px-3 py-2 font-semibold text-rose-50">
+                  <span className="h-2 w-2 rounded-full bg-rose-300" />
+                  Kliknij przycisk poniżej, aby przejść do grafiku.
+                </span>
+                <a
+                  href="#grafik"
+                  className="inline-flex w-fit items-center gap-2 rounded-full border border-rose-300/60 bg-rose-200/20 px-4 py-2 font-semibold text-rose-50 transition hover:bg-rose-200/40"
+                >
+                  Przejdź do grafiku
+                </a>
+                <p className="text-[11px] text-rose-100/70">
+                  Po wprowadzeniu zmian użyj przycisku zapisu dostępnego pod tabelą z grafikiem.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="glass-panel rounded-3xl p-5 md:p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -379,7 +494,7 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div id="grafik" className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => handleMonthChange(-1)}
@@ -513,60 +628,6 @@ export default function DashboardPage() {
                 <p className="text-sm text-sky-100/80">Brak pracowników do wyświetlenia.</p>
               )}
             </div>
-
-            {isAdmin && (
-              <form onSubmit={handleAddEmployee} className="mt-6 space-y-4 rounded-2xl border border-sky-200/30 bg-slate-900/60 p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold text-sky-100">Dodaj pracownika</h3>
-                  <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-100">Admin</span>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <label className="text-xs uppercase tracking-wide text-sky-200">Imię</label>
-                    <input
-                      type="text"
-                      value={employeeForm.firstName}
-                      onChange={(e) => setEmployeeForm((prev) => ({ ...prev, firstName: e.target.value }))}
-                      className="w-full rounded-xl border border-sky-300/40 bg-slate-950/40 px-3 py-2 text-sm text-sky-50 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-400/70"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs uppercase tracking-wide text-sky-200">Nazwisko</label>
-                    <input
-                      type="text"
-                      value={employeeForm.lastName}
-                      onChange={(e) => setEmployeeForm((prev) => ({ ...prev, lastName: e.target.value }))}
-                      className="w-full rounded-xl border border-sky-300/40 bg-slate-950/40 px-3 py-2 text-sm text-sky-50 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-400/70"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs uppercase tracking-wide text-sky-200">Stanowisko</label>
-                    <select
-                      value={employeeForm.position}
-                      onChange={(e) => setEmployeeForm((prev) => ({ ...prev, position: e.target.value as Position }))}
-                      className="w-full rounded-xl border border-sky-300/40 bg-slate-950/40 px-3 py-2 text-sm text-sky-50 outline-none focus:border-sky-300 focus:ring-2 focus:ring-sky-400/70"
-                    >
-                      {POSITIONS.map((pos) => (
-                        <option key={pos} value={pos} className="bg-slate-900">
-                          {pos}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={formPending}
-                  className="w-full rounded-2xl bg-gradient-to-r from-sky-400 via-sky-500 to-sky-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {formPending ? "Dodawanie..." : "Dodaj pracownika"}
-                </button>
-              </form>
-            )}
 
             {loadingData && (
               <p className="mt-4 text-xs text-sky-100/70">Trwa pobieranie danych...</p>
