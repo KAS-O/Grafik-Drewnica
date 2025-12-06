@@ -94,12 +94,15 @@ function mergeEntriesWithEmployees(entries, employees) {
 
   employees.forEach((employee) => {
     const fullName = `${employee.firstName} ${employee.lastName}`.trim();
+
     next[employee.id] = {
       shifts: {},
       ...next[employee.id],
       fullName,
       position: employee.position,
-      userId: employee.assignedUserId || null
+      userId: employee.assignedUserId || null,
+      firstName: employee.firstName,
+      lastName: employee.lastName
     };
   });
 
@@ -126,6 +129,12 @@ function cycleShiftValue(current) {
   return "D";
 }
 
+function getShiftTone(value) {
+  if (value === "D") return "bg-amber-400/80 text-slate-950";
+  if (value === "N") return "bg-sky-400/80 text-slate-950";
+  return "bg-slate-900/50 text-slate-100/80";
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { user, role, profile, loading } = useAuth();
@@ -143,6 +152,12 @@ export default function DashboardPage() {
   const [assignmentForm, setAssignmentForm] = useState({ employeeId: "", accountEmail: "" });
   const [statusMessage, setStatusMessage] = useState("");
   const db = useMemo(() => getFirestore(app), []);
+
+  useEffect(() => {
+    if (role === "Administrator") {
+      setAdminPanelOpen(true);
+    }
+  }, [role]);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -252,7 +267,11 @@ export default function DashboardPage() {
       };
 
       const ref = await addDoc(collection(db, "employees"), payload);
-      setEmployees((prev) => [...prev, { id: ref.id, ...payload }]);
+      const createdEmployee = { id: ref.id, ...payload };
+      setEmployees((prev) => [...prev, createdEmployee]);
+      setScheduleEntries((prev) =>
+        mergeEntriesWithEmployees(prev, [createdEmployee])
+      );
       setEmployeeForm({ firstName: "", lastName: "", position: POSITIONS[0] });
       setAssignmentForm((prev) => ({ ...prev, employeeId: ref.id }));
       setStatusMessage("Dodano nowego pracownika.");
@@ -328,6 +347,12 @@ export default function DashboardPage() {
   const handleSaveSchedule = async () => {
     setScheduleSaving(true);
     setStatusMessage("");
+
+    if (!isAdmin) {
+      setScheduleSaving(false);
+      setStatusMessage("Tylko administrator może zapisać grafik.");
+      return;
+    }
 
     try {
       const viewerIds = Object.values(scheduleEntries)
@@ -511,12 +536,24 @@ export default function DashboardPage() {
                       const entry = scheduleEntries[employee.id];
                       const value = entry?.shifts?.[day.dayNumber] || "";
                       const isPersonal = personalEmployee && personalEmployee.id === employee.id;
+                      const tone = getShiftTone(value);
+                      const editableCell = isAdmin;
+
                       return (
                         <td
                           key={`${employee.id}-day-${day.dayNumber}`}
                           className={`${getDayCellClasses(day)} text-center align-middle`}
                         >
-                          {value ? (
+                          {editableCell ? (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleShift(employee.id, day.dayNumber)}
+                              className={`mx-auto flex h-8 w-16 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold transition hover:scale-105 focus:outline-none focus:ring-2 focus:ring-sky-400/50 ${tone}`}
+                              title="Kliknij, aby zmieniać dyżur (pusty → D → N → pusty)"
+                            >
+                              {value || "—"}
+                            </button>
+                          ) : value ? (
                             <span
                               className={`inline-flex min-w-[28px] items-center justify-center rounded-full px-2 py-1 text-[10px] font-bold ${
                                 isPersonal ? "bg-slate-900/60 ring-2 ring-sky-300/60" : "bg-slate-900/30"
@@ -723,12 +760,7 @@ export default function DashboardPage() {
                         {days.map((day) => {
                           const entry = scheduleEntries[employee.id] || { shifts: {} };
                           const value = entry.shifts?.[day.dayNumber] || "";
-                          const tone =
-                            value === "D"
-                              ? "bg-amber-400/80 text-slate-950"
-                              : value === "N"
-                                ? "bg-sky-400/80 text-slate-950"
-                                : "bg-slate-900/50 text-rose-100/70";
+                          const tone = getShiftTone(value);
 
                           return (
                             <td
