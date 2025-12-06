@@ -1,52 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
-import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  getFirestore,
-  serverTimestamp,
-  setDoc,
-  type Firestore
-} from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, getFirestore, type Firestore } from "firebase/firestore";
 import { auth, app } from "../../lib/firebase";
 import { useAuth } from "../../context/AuthContext";
-
-const POSITIONS = [
-  "Pielęgniarka / Pielęgniarz",
-  "Opiekun Medyczny",
-  "Sanitariusz",
-  "Salowa"
-] as const;
-
-const WEEKDAYS = [
-  "Niedziela",
-  "Poniedziałek",
-  "Wtorek",
-  "Środa",
-  "Czwartek",
-  "Piątek",
-  "Sobota"
-];
-
-type Position = (typeof POSITIONS)[number];
-type ShiftValue = "" | "D" | "N";
+import { buildDays, getDayCellClasses, getMonthKey, getMonthLabel, mergeEntriesWithEmployees, type DayCell } from "./utils";
 
 type Employee = {
   id: string;
   firstName: string;
   lastName: string;
-  position: Position | string;
+  position: string;
   createdAt?: unknown;
 };
 
 type ScheduleEntry = {
-  shifts: Record<number, ShiftValue>;
+  shifts: Record<number, string>;
   fullName: string;
   position: string;
 };
@@ -58,103 +29,18 @@ type StatusState = {
   text: string;
 };
 
-type DayCell = {
-  dayNumber: number;
-  weekday: number;
-  label: string;
-  tone: string;
-  isSaturday: boolean;
-  isSundayOrHoliday: boolean;
+type ScheduleDocument = {
+  entries?: ScheduleEntries;
+  customHolidays?: number[];
 };
 
-const POLISH_HOLIDAYS = new Set([
-  "01-01",
-  "01-06",
-  "05-01",
-  "05-03",
-  "08-15",
-  "11-01",
-  "11-11",
-  "12-25",
-  "12-26"
-]);
-
-function getMonthKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  return `${year}-${month}`;
-}
-
-function getMonthLabel(date: Date): string {
-  return date.toLocaleDateString("pl-PL", { month: "long", year: "numeric" });
-}
-
-function buildDays(date: Date): DayCell[] {
-  const year = date.getFullYear();
-  const month = date.getMonth();
-  const total = new Date(year, month + 1, 0).getDate();
-
-  return Array.from({ length: total }, (_, index) => {
-    const dayNumber = index + 1;
-    const current = new Date(year, month, dayNumber);
-    const weekday = current.getDay();
-    const monthKey = `${`${month + 1}`.padStart(2, "0")}-${`${dayNumber}`.padStart(2, "0")}`;
-    const isSundayOrHoliday = weekday === 0 || POLISH_HOLIDAYS.has(monthKey);
-    const isSaturday = weekday === 6;
-
-    let tone = "bg-sky-50 text-slate-900 border-sky-100";
-    if (isSaturday) {
-      tone = "bg-emerald-100 text-emerald-900 border-emerald-200";
-    }
-    if (isSundayOrHoliday) {
-      tone = "bg-red-100 text-red-900 border-red-200";
-    }
-
-    return {
-      dayNumber,
-      weekday,
-      label: WEEKDAYS[weekday],
-      tone,
-      isSaturday,
-      isSundayOrHoliday
-    };
-  });
-}
-
-function mergeEntriesWithEmployees(entries: ScheduleEntries, employees: Employee[]): ScheduleEntries {
-  const combined: ScheduleEntries = {};
-
-  employees.forEach((employee) => {
-    const key = employee.id;
-    const existing = entries[key] || { shifts: {} };
-    combined[key] = {
-      shifts: existing.shifts || {},
-      fullName: `${employee.firstName} ${employee.lastName}`.trim(),
-      position: employee.position || ""
-    };
-  });
-
-  return combined;
-}
-
-function cycleShiftValue(current: ShiftValue): ShiftValue {
-  if (current === "D") return "N";
-  if (current === "N") return "";
-  return "D";
-}
-
-function getDayCellClasses(day: DayCell, isEditable = false): string {
-  const padding = isEditable ? "px-1.5 py-1" : "px-2 py-2";
-
-  if (day.isSundayOrHoliday) {
-    return `${padding} bg-rose-900/40 text-rose-50 border border-rose-500/30`;
-  }
-
-  if (day.isSaturday) {
-    return `${padding} bg-amber-900/30 text-amber-50 border border-amber-400/30`;
-  }
-
-  return `${padding} bg-slate-900/40 text-sky-50 border border-sky-200/20`;
+function deriveShiftTone(value: string): string {
+  if (!value) return "bg-slate-900/50 text-sky-100/70";
+  if (value.startsWith("N")) return "bg-sky-300/90 text-slate-950";
+  if (value.startsWith("D")) return "bg-amber-300/90 text-slate-950";
+  if (/^\d/.test(value) || value.includes(":")) return "bg-amber-200/90 text-slate-950";
+  if (value.startsWith("1")) return "bg-emerald-200/90 text-emerald-950";
+  return "bg-slate-200/90 text-slate-900";
 }
 
 export default function DashboardPage() {
@@ -162,17 +48,10 @@ export default function DashboardPage() {
   const { user, loading, isAdmin, role } = useAuth();
   const [currentMonth, setCurrentMonth] = useState<Date>(() => new Date());
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [customHolidays, setCustomHolidays] = useState<number[]>([]);
   const [scheduleEntries, setScheduleEntries] = useState<ScheduleEntries>({});
   const [loadingData, setLoadingData] = useState(false);
-  const [scheduleSaving, setScheduleSaving] = useState(false);
-  const [scheduleDirty, setScheduleDirty] = useState(false);
   const [status, setStatus] = useState<StatusState>({ type: "", text: "" });
-  const [employeeForm, setEmployeeForm] = useState<Pick<Employee, "firstName" | "lastName" | "position">>({
-    firstName: "",
-    lastName: "",
-    position: POSITIONS[0]
-  });
-  const [formPending, setFormPending] = useState(false);
   const db: Firestore = useMemo(() => getFirestore(app), []);
 
   useEffect(() => {
@@ -182,7 +61,6 @@ export default function DashboardPage() {
   }, [user, loading, router]);
 
   const monthId = useMemo(() => getMonthKey(currentMonth), [currentMonth]);
-  const days = useMemo(() => buildDays(currentMonth), [currentMonth]);
 
   useEffect(() => {
     if (!user) return;
@@ -193,20 +71,25 @@ export default function DashboardPage() {
 
       try {
         const employeesSnap = await getDocs(collection(db, "employees"));
-        const employeeList: Employee[] = employeesSnap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<Employee, "id">) }));
+        const employeeList: Employee[] = employeesSnap.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...(docSnap.data() as Omit<Employee, "id">)
+        }));
         setEmployees(employeeList);
 
         const scheduleRef = doc(db, "schedules", monthId);
         const scheduleSnap = await getDoc(scheduleRef);
-        const loadedEntries = (scheduleSnap.exists() ? (scheduleSnap.data()?.entries as ScheduleEntries) || {} : {}) as ScheduleEntries;
+        const scheduleData = (scheduleSnap.exists() ? scheduleSnap.data() : {}) as ScheduleDocument;
+        const loadedEntries = (scheduleData.entries as ScheduleEntries) || {};
 
+        setCustomHolidays(scheduleData.customHolidays || []);
         setScheduleEntries(mergeEntriesWithEmployees(loadedEntries, employeeList));
-        setScheduleDirty(false);
       } catch (error) {
         console.error("Nie udało się pobrać danych:", error);
         setStatus({ type: "error", text: "Nie udało się pobrać danych z Firestore." });
         setEmployees([]);
         setScheduleEntries({});
+        setCustomHolidays([]);
       } finally {
         setLoadingData(false);
       }
@@ -214,6 +97,9 @@ export default function DashboardPage() {
 
     void load();
   }, [user, monthId, db]);
+
+  const days: DayCell[] = useMemo(() => buildDays(currentMonth, new Set(customHolidays)), [currentMonth, customHolidays]);
+  const visibleEmployees = employees;
 
   const handleLogout = async () => {
     try {
@@ -232,107 +118,6 @@ export default function DashboardPage() {
     });
   };
 
-  const handleAddEmployee = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setStatus({ type: "", text: "" });
-
-    if (!isAdmin) {
-      setStatus({ type: "error", text: "Tylko administrator może dodawać pracowników." });
-      return;
-    }
-
-    if (formPending) return;
-
-    const trimmedFirst = employeeForm.firstName.trim();
-    const trimmedLast = employeeForm.lastName.trim();
-
-    if (!trimmedFirst || !trimmedLast) {
-      setStatus({ type: "error", text: "Uzupełnij imię i nazwisko." });
-      return;
-    }
-
-    try {
-      setFormPending(true);
-      const payload = {
-        firstName: trimmedFirst,
-        lastName: trimmedLast,
-        position: employeeForm.position,
-        createdAt: serverTimestamp()
-      };
-
-      const ref = await addDoc(collection(db, "employees"), payload);
-      const newEmployee: Employee = { id: ref.id, ...payload };
-
-      setEmployees((prev) => [...prev, newEmployee]);
-      setScheduleEntries((prev) => ({
-        ...prev,
-        [ref.id]: {
-          shifts: {},
-          fullName: `${trimmedFirst} ${trimmedLast}`.trim(),
-          position: employeeForm.position
-        }
-      }));
-      setEmployeeForm({ firstName: "", lastName: "", position: POSITIONS[0] });
-      setStatus({ type: "success", text: "Dodano pracownika." });
-    } catch (error) {
-      console.error("Nie udało się dodać pracownika:", error);
-      setStatus({ type: "error", text: "Nie udało się dodać pracownika. Sprawdź uprawnienia." });
-    } finally {
-      setFormPending(false);
-    }
-  };
-
-  const handleToggleShift = (employeeId: string, dayNumber: number) => {
-    if (!isAdmin) return;
-
-    setScheduleEntries((prev) => {
-      const current = prev[employeeId] || { shifts: {} };
-      const currentValue = current.shifts?.[dayNumber] || "";
-      const nextValue = cycleShiftValue(currentValue as ShiftValue);
-      setScheduleDirty(true);
-      return {
-        ...prev,
-        [employeeId]: {
-          ...current,
-          shifts: { ...current.shifts, [dayNumber]: nextValue }
-        }
-      };
-    });
-  };
-
-  const handleSaveSchedule = async () => {
-    setStatus({ type: "", text: "" });
-
-    if (!isAdmin) {
-      setStatus({ type: "error", text: "Tylko administrator może zapisać grafik." });
-      return;
-    }
-
-    setScheduleSaving(true);
-
-    try {
-      await setDoc(
-        doc(db, "schedules", monthId),
-        {
-          month: monthId,
-          entries: scheduleEntries,
-          updatedAt: serverTimestamp()
-        },
-        { merge: true }
-      );
-
-      setScheduleDirty(false);
-      setStatus({ type: "success", text: "Grafik zapisany." });
-    } catch (error) {
-      console.error("Nie udało się zapisać grafiku:", error);
-      setStatus({ type: "error", text: "Nie udało się zapisać grafiku." });
-    } finally {
-      setScheduleSaving(false);
-    }
-  };
-
-  const visibleEmployees = employees;
-
   return (
     <main className="min-h-screen bg-slate-950 px-4 py-8 text-sky-50">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
@@ -342,12 +127,14 @@ export default function DashboardPage() {
             <h1 className="text-2xl font-semibold">Grafik Drewnica</h1>
           </div>
           <div className="flex items-center gap-3 text-sm font-semibold">
-            <a
-              href="#panel-administracji"
-              className="rounded-full border border-rose-400/60 bg-rose-900/60 px-3 py-1.5 text-xs font-semibold text-rose-50 shadow-inner transition hover:bg-rose-700/60"
-            >
-              Panel Administracji
-            </a>
+            {isAdmin && (
+              <a
+                href="/dashboard/admin"
+                className="rounded-full border border-rose-400/60 bg-rose-900/60 px-3 py-1.5 text-xs font-semibold text-rose-50 shadow-inner transition hover:bg-rose-700/60"
+              >
+                Panel Administracji
+              </a>
+            )}
             <span className="rounded-full border border-sky-400/60 bg-sky-400/10 px-3 py-1 text-sky-100">{role || "--"}</span>
             <button
               onClick={handleLogout}
@@ -362,277 +149,114 @@ export default function DashboardPage() {
           <div
             className={`rounded-2xl border px-4 py-3 text-sm ${
               status.type === "error"
-                ? "border-red-400/40 bg-red-500/10 text-red-100"
-                : "border-emerald-400/30 bg-emerald-500/10 text-emerald-100"
+                ? "border-red-300/60 bg-red-900/40 text-red-100"
+                : status.type === "success"
+                  ? "border-emerald-300/60 bg-emerald-900/40 text-emerald-50"
+                  : "border-sky-200/60 bg-slate-900/60 text-sky-100"
             }`}
           >
             {status.text}
           </div>
         )}
 
-        <section
-          id="panel-administracji"
-          className="rounded-3xl border border-rose-400/30 bg-gradient-to-r from-rose-950 via-rose-900/60 to-slate-950 p-5 text-rose-50 shadow-xl"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-2">
-              <div className="inline-flex items-center gap-2 rounded-full border border-rose-300/40 bg-rose-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-rose-100">
-                <span className="h-2 w-2 rounded-full bg-rose-400 shadow-neon" />
-                Panel Administracji
-              </div>
-              <div className="space-y-1">
-                <h2 className="text-lg font-semibold text-rose-50">Zarządzanie grafikiem</h2>
-                <p className="max-w-3xl text-sm text-rose-100/80">
-                  Dodawaj pracowników oraz edytuj miesięczny grafik w jednym miejscu. Poniżej znajdziesz formularz
-                  dodawania pracowników oraz szybki skrót do sekcji edycji grafiku.
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-              <a
-                href="#grafik"
-                className="rounded-full border border-rose-300/60 bg-rose-200/20 px-4 py-2 text-rose-50 transition hover:bg-rose-200/40"
-              >
-                Edytuj grafik
-              </a>
-              <span className="rounded-full border border-emerald-400/50 bg-emerald-500/10 px-3 py-1 text-emerald-100">
-                {isAdmin ? "Administrator" : "Podgląd"}
-              </span>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-            <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Dodawanie pracowników</h3>
-              {isAdmin ? (
-                <form onSubmit={handleAddEmployee} className="mt-3 space-y-4">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-rose-100">Imię</label>
-                      <input
-                        type="text"
-                        value={employeeForm.firstName}
-                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, firstName: e.target.value }))}
-                        className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-rose-100">Nazwisko</label>
-                      <input
-                        type="text"
-                        value={employeeForm.lastName}
-                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, lastName: e.target.value }))}
-                        className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs uppercase tracking-wide text-rose-100">Stanowisko</label>
-                    <select
-                      value={employeeForm.position}
-                      onChange={(e) => setEmployeeForm((prev) => ({ ...prev, position: e.target.value as Position }))}
-                      className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
-                    >
-                      {POSITIONS.map((pos) => (
-                        <option key={pos} value={pos} className="bg-slate-900">
-                          {pos}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={formPending}
-                    className="w-full rounded-2xl bg-gradient-to-r from-rose-400 via-rose-500 to-rose-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {formPending ? "Dodawanie..." : "Dodaj pracownika"}
-                  </button>
-                </form>
-              ) : (
-                <p className="mt-2 text-sm text-rose-100/80">
-                  Panel administracyjny jest dostępny tylko dla administratorów. Poproś o dostęp, aby dodawać pracowników i edytować grafik.
-                </p>
-              )}
-            </div>
-
-            <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Edycja grafiku</h3>
-              <p className="mt-2 text-sm text-rose-100/80">
-                W sekcji grafiku możesz klikać w pola dyżurów, aby zmieniać wartości oraz zapisać całość w Firestore.
-              </p>
-              <div className="mt-3 flex flex-col gap-2 text-xs text-rose-100/80">
-                <span className="inline-flex items-center gap-2 rounded-lg border border-rose-200/40 bg-rose-200/10 px-3 py-2 font-semibold text-rose-50">
-                  <span className="h-2 w-2 rounded-full bg-rose-300" />
-                  Kliknij przycisk poniżej, aby przejść do grafiku.
-                </span>
-                <a
-                  href="#grafik"
-                  className="inline-flex w-fit items-center gap-2 rounded-full border border-rose-300/60 bg-rose-200/20 px-4 py-2 font-semibold text-rose-50 transition hover:bg-rose-200/40"
-                >
-                  Przejdź do grafiku
-                </a>
-                <p className="text-[11px] text-rose-100/70">
-                  Po wprowadzeniu zmian użyj przycisku zapisu dostępnego pod tabelą z grafikiem.
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="glass-panel rounded-3xl p-5 md:p-6">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-col gap-1">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Grafik miesięczny</h2>
-                <p className="text-xs text-sky-100/80">
-                  Lista pracowników i prosty układ dyżurów. Kliknięcie pola zmienia wartość (pusty → D → N → pusty).
-                </p>
-              </div>
-              <div className="flex items-center gap-2 text-[11px] font-medium text-sky-100">
-                <span className="rounded-full bg-sky-400/10 px-3 py-1">{days.length} dni</span>
-                <span className="rounded-full bg-sky-400/10 px-3 py-1">{visibleEmployees.length} prac.</span>
-              </div>
-            </div>
-
-            <div id="grafik" className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleMonthChange(-1)}
-                  className="rounded-full border border-sky-200/40 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/10"
-                >
-                  Poprzedni
-                </button>
-                <button
-                  onClick={() => setCurrentMonth(new Date())}
-                  className="rounded-full border border-sky-200/40 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/10"
-                >
-                  Dzisiaj
-                </button>
-                <button
-                  onClick={() => handleMonthChange(1)}
-                  className="rounded-full border border-sky-200/40 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/10"
-                >
-                  Następny
-                </button>
-              </div>
-              <p className="text-sm font-semibold text-sky-50">{getMonthLabel(currentMonth)}</p>
-            </div>
-
-            <div className="overflow-auto rounded-2xl border border-sky-200/30">
-              <table className="min-w-full text-[11px] text-sky-50">
-                <thead className="bg-slate-900/60">
-                  <tr>
-                    <th className="sticky left-0 z-10 bg-slate-900/60 px-4 py-3 text-left text-xs font-semibold">Pracownik</th>
-                    {days.map((day) => (
-                      <th
-                        key={`day-header-${day.dayNumber}`}
-                        className={`${getDayCellClasses(day)} text-center text-[10px] font-semibold`}
-                      >
-                        <div className="flex flex-col items-center gap-0.5">
-                          <span className="text-xs">{day.dayNumber}</span>
-                          <span className="text-[10px] uppercase tracking-wide opacity-80">{day.label.slice(0, 3)}</span>
-                        </div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleEmployees.map((employee) => (
-                    <tr key={`row-${employee.id}`} className="odd:bg-slate-900/40 even:bg-slate-900/20">
-                      <td className="sticky left-0 z-10 bg-slate-950/80 px-4 py-3 text-left">
-                        <div className="font-semibold">{employee.firstName} {employee.lastName}</div>
-                        <div className="text-[10px] uppercase tracking-wide text-sky-100/70">{employee.position}</div>
-                      </td>
-                      {days.map((day) => {
-                        const entry = scheduleEntries[employee.id];
-                        const value = entry?.shifts?.[day.dayNumber] || "";
-                        const tone =
-                          value === "D"
-                            ? "bg-amber-300/90 text-slate-950"
-                            : value === "N"
-                              ? "bg-sky-300/90 text-slate-950"
-                              : "bg-slate-900/50 text-sky-100/70";
-                        return (
-                          <td
-                            key={`${employee.id}-day-${day.dayNumber}`}
-                            className={`${getDayCellClasses(day)} text-center align-middle`}
-                          >
-                            {isAdmin ? (
-                              <button
-                                type="button"
-                                onClick={() => handleToggleShift(employee.id, day.dayNumber)}
-                                className={`mx-auto flex h-8 w-12 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold transition hover:scale-105 focus:outline-none focus:ring-2 focus:ring-sky-300/60 ${tone}`}
-                                title="Kliknij, aby zmieniać dyżur"
-                              >
-                                {value || "-"}
-                              </button>
-                            ) : (
-                              <span className={`mx-auto flex h-8 w-12 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold ${tone}`}>
-                                {value || "-"}
-                              </span>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-
-                  {!visibleEmployees.length && (
-                    <tr>
-                      <td
-                        colSpan={days.length + 1}
-                        className="px-4 py-6 text-center text-sm text-sky-100/80"
-                      >
-                        Brak pracowników. Dodaj pracownika w panelu administratora.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="mt-4 flex items-center justify-between gap-3">
+        <section className="rounded-3xl border border-sky-200/20 bg-slate-900/50 p-5 md:p-6">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col gap-1">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Grafik miesięczny</h2>
               <p className="text-xs text-sky-100/80">
-                Edycja grafiku jest dostępna tylko dla administratora. Użytkownik widzi podgląd.
+                Podgląd grafiku. Aby edytować dyżury i pracowników, przejdź do panelu administracji.
               </p>
-              {isAdmin && (
-                <button
-                  onClick={handleSaveSchedule}
-                  disabled={scheduleSaving || loadingData || !scheduleDirty}
-                  className="rounded-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {scheduleSaving ? "Zapisywanie..." : scheduleDirty ? "Zapisz grafik" : "Grafik zapisany"}
-                </button>
-              )}
+            </div>
+            <div className="flex items-center gap-2 text-[11px] font-medium text-sky-100">
+              <span className="rounded-full bg-sky-400/10 px-3 py-1">{days.length} dni</span>
+              <span className="rounded-full bg-sky-400/10 px-3 py-1">{visibleEmployees.length} prac.</span>
             </div>
           </div>
 
-          <div className="glass-panel rounded-3xl p-5 md:p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Lista pracowników</h2>
-                <p className="text-xs text-sky-100/80">Pracownicy to osobne wpisy – nie są kontami logowania.</p>
-              </div>
-              <span className="rounded-full bg-sky-400/10 px-3 py-1 text-[11px] font-semibold text-sky-100">{employees.length}</span>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleMonthChange(-1)}
+                className="rounded-full border border-sky-200/40 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/10"
+              >
+                Poprzedni
+              </button>
+              <button
+                onClick={() => setCurrentMonth(new Date())}
+                className="rounded-full border border-sky-200/40 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/10"
+              >
+                Dzisiaj
+              </button>
+              <button
+                onClick={() => handleMonthChange(1)}
+                className="rounded-full border border-sky-200/40 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/10"
+              >
+                Następny
+              </button>
             </div>
-
-            <div className="space-y-3">
-              {employees.map((employee) => (
-                <div key={employee.id} className="rounded-2xl border border-sky-200/30 bg-slate-900/60 px-4 py-3 text-sm">
-                  <div className="font-semibold text-sky-50">{employee.firstName} {employee.lastName}</div>
-                  <div className="text-[12px] uppercase tracking-wide text-sky-100/70">{employee.position}</div>
-                </div>
-              ))}
-
-              {!employees.length && (
-                <p className="text-sm text-sky-100/80">Brak pracowników do wyświetlenia.</p>
-              )}
-            </div>
-
-            {loadingData && (
-              <p className="mt-4 text-xs text-sky-100/70">Trwa pobieranie danych...</p>
-            )}
+            <p className="text-sm font-semibold text-sky-50">{getMonthLabel(currentMonth)}</p>
           </div>
+
+          <div className="overflow-auto rounded-2xl border border-sky-200/30">
+            <table className="min-w-full text-[11px] text-sky-50">
+              <thead className="bg-slate-900/60">
+                <tr>
+                  <th className="sticky left-0 z-10 bg-slate-900/60 px-4 py-3 text-left text-xs font-semibold">Pracownik</th>
+                  {days.map((day) => (
+                    <th
+                      key={`day-header-${day.dayNumber}`}
+                      className={`${getDayCellClasses(day)} text-center text-[10px] font-semibold`}
+                    >
+                      <div className="flex flex-col items-center gap-0.5">
+                        <span className="text-xs">{day.dayNumber}</span>
+                        <span className="text-[10px] uppercase tracking-wide opacity-80">{day.label.slice(0, 3)}</span>
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visibleEmployees.map((employee) => (
+                  <tr key={`row-${employee.id}`} className="odd:bg-slate-900/40 even:bg-slate-900/20">
+                    <td className="sticky left-0 z-10 bg-slate-950/80 px-4 py-3 text-left">
+                      <div className="font-semibold">{employee.firstName} {employee.lastName}</div>
+                      <div className="text-[10px] uppercase tracking-wide text-sky-100/70">{employee.position}</div>
+                    </td>
+                    {days.map((day) => {
+                      const entry = scheduleEntries[employee.id];
+                      const value = entry?.shifts?.[day.dayNumber] || "";
+                      const tone = deriveShiftTone(value);
+                      return (
+                        <td
+                          key={`${employee.id}-day-${day.dayNumber}`}
+                          className={`${getDayCellClasses(day)} text-center align-middle`}
+                        >
+                          <span className={`mx-auto flex h-8 w-12 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold ${tone}`}>
+                            {value || "-"}
+                          </span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+
+                {!visibleEmployees.length && (
+                  <tr>
+                    <td
+                      colSpan={days.length + 1}
+                      className="px-4 py-6 text-center text-sm text-sky-100/80"
+                    >
+                      Brak pracowników. Administrator może dodać pracowników w panelu administracyjnym.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {loadingData && (
+            <p className="mt-4 text-xs text-sky-100/70">Trwa pobieranie danych...</p>
+          )}
         </section>
       </div>
     </main>
