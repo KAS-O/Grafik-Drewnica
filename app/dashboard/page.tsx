@@ -11,6 +11,7 @@ import {
   getDayCellClasses,
   getMonthKey,
   getMonthLabel,
+  getPositionTheme,
   groupEmployeesByPosition,
   mergeEntriesWithEmployees,
   sortEmployees,
@@ -240,56 +241,78 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {groupedEmployees.map((group, groupIndex) => (
+                {groupedEmployees.map((group) => (
                   <Fragment key={`group-${group.position}`}>
-                    {groupIndex > 0 && (
-                      <tr>
-                        <td colSpan={days.length + 1} className="h-2 bg-slate-950/60" />
-                      </tr>
-                    )}
-                    {group.items.map((employee) => (
-                      <tr key={`row-${employee.id}`} className="odd:bg-slate-900/40 even:bg-slate-900/20">
-                        <td className="sticky left-0 z-10 bg-slate-950/80 px-4 py-3 text-left">
-                          <div className="font-semibold">{employee.firstName} {employee.lastName}</div>
-                          <div className="text-[10px] uppercase tracking-wide text-sky-100/70">{employee.position}</div>
-                        </td>
-                        {days.map((day) => {
-                          const entry = scheduleEntries[employee.id];
-                          const value = entry?.shifts?.[day.dayNumber] || "";
-                          const tone = deriveShiftTone(value);
-                          const badges = extractShiftBadges(value);
-                          return (
-                            <td
-                              key={`${employee.id}-day-${day.dayNumber}`}
-                              className={`${getDayCellClasses(day)} text-center align-middle`}
-                            >
-                              <span
-                                className={`relative mx-auto flex h-12 w-16 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold ${tone}`}
-                              >
-                                {badges.hasK && (
-                                  <span className="absolute left-1 top-1 rounded-sm bg-red-700 px-1 text-[10px] font-bold text-red-50 shadow-lg">
-                                    K
-                                  </span>
-                                )}
-                                <span className="absolute right-1 top-1 flex flex-col gap-1">
-                                  {badges.hasO && (
-                                    <span className="rounded-sm bg-emerald-400 px-1 text-[10px] font-bold text-emerald-950 shadow">
-                                      O
-                                    </span>
-                                  )}
-                                  {badges.hasR && (
-                                    <span className="rounded-sm bg-sky-300 px-1 text-[10px] font-bold text-sky-950 shadow">
-                                      R
-                                    </span>
-                                  )}
-                                </span>
-                                <span className="text-sm font-bold tracking-wide">{badges.base}</span>
+                    {(() => {
+                      const theme = getPositionTheme(group.position);
+
+                      return (
+                        <tr>
+                          <td
+                            colSpan={days.length + 1}
+                            className={`bg-slate-950/80 px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.2em] ${theme.rowBorder}`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={`h-2 w-2 rounded-full ${theme.accentDot}`} />
+                              <span className={`text-xs ${theme.labelText}`}>{group.position}</span>
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${theme.labelPill}`}>
+                                {group.items.length} os.
                               </span>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })()}
+                    {group.items.map((employee, employeeIndex) => {
+                      const theme = getPositionTheme(employee.position);
+
+                      return (
+                        <tr
+                          key={`row-${employee.id}`}
+                          className={`${employeeIndex % 2 === 0 ? "bg-slate-900/40" : "bg-slate-900/20"}`}
+                        >
+                          <td className={`sticky left-0 z-10 px-4 py-3 text-left ${theme.rowBg} ${theme.rowBorder} ${theme.accentBorder}`}>
+                            <div className="font-semibold">{employee.firstName} {employee.lastName}</div>
+                            <div className="text-[10px] uppercase tracking-wide text-sky-100/70">{employee.position}</div>
+                          </td>
+                          {days.map((day) => {
+                            const entry = scheduleEntries[employee.id];
+                            const value = entry?.shifts?.[day.dayNumber] || "";
+                            const tone = deriveShiftTone(value);
+                            const badges = extractShiftBadges(value);
+                            return (
+                              <td
+                                key={`${employee.id}-day-${day.dayNumber}`}
+                                className={`${getDayCellClasses(day)} text-center align-middle`}
+                              >
+                                <span
+                                  className={`relative mx-auto flex h-12 w-16 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold ${tone}`}
+                                >
+                                  {badges.hasK && (
+                                    <span className="absolute left-1 top-1 rounded-sm bg-red-700 px-1 text-[10px] font-bold text-red-50 shadow-lg">
+                                      K
+                                    </span>
+                                  )}
+                                  <span className="absolute right-1 top-1 flex flex-col gap-1">
+                                    {badges.hasO && (
+                                      <span className="rounded-sm bg-emerald-400 px-1 text-[10px] font-bold text-emerald-950 shadow">
+                                        O
+                                      </span>
+                                    )}
+                                    {badges.hasR && (
+                                      <span className="rounded-sm bg-sky-300 px-1 text-[10px] font-bold text-sky-950 shadow">
+                                        R
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="text-sm font-bold tracking-wide">{badges.base}</span>
+                                </span>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
                   </Fragment>
                 ))}
 

@@ -22,6 +22,7 @@ import {
   getDayCellClasses,
   getMonthKey,
   getMonthLabel,
+  getPositionTheme,
   groupEmployeesByPosition,
   mergeEntriesWithEmployees,
   sortEmployees,
@@ -149,6 +150,7 @@ export default function AdminDashboardPage() {
   const days: DayCell[] = useMemo(() => buildDays(currentMonth, customHolidaySet), [currentMonth, customHolidaySet]);
   const groupedEmployees = useMemo(() => groupEmployeesByPosition(employees), [employees]);
   const sortedEmployees = useMemo(() => sortEmployees(employees), [employees]);
+  const [deletingEmployeeId, setDeletingEmployeeId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user || !isAdmin) return;
@@ -256,30 +258,33 @@ export default function AdminDashboardPage() {
 
   const handleDeleteEmployee = async (employeeId: string) => {
     if (!isAdmin) return;
-    const confirmed = window.confirm("Czy na pewno chcesz usunąć pracownika z grafiku?");
-    if (!confirmed) return;
+    if (deletingEmployeeId) return;
 
     try {
-      const updatedEntries = { ...scheduleEntries };
-      delete updatedEntries[employeeId];
+      setDeletingEmployeeId(employeeId);
+      setStatus({ type: "", text: "" });
+
+      const { [employeeId]: _, ...remainingEntries } = scheduleEntries;
 
       await deleteDoc(doc(db, "employees", employeeId));
       await setDoc(
         doc(db, "schedules", monthId),
         {
-          entries: updatedEntries,
+          entries: remainingEntries,
           updatedAt: serverTimestamp()
         },
         { merge: true }
       );
 
       setEmployees((prev) => prev.filter((emp) => emp.id !== employeeId));
-      setScheduleEntries(updatedEntries);
+      setScheduleEntries(remainingEntries);
       setScheduleDirty(true);
       setStatus({ type: "success", text: "Usunięto pracownika i zaktualizowano grafik." });
     } catch (error) {
       console.error("Nie udało się usunąć pracownika:", error);
       setStatus({ type: "error", text: "Nie udało się usunąć pracownika." });
+    } finally {
+      setDeletingEmployeeId(null);
     }
   };
 
@@ -501,31 +506,50 @@ export default function AdminDashboardPage() {
             </div>
 
             <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Lista pracowników</h3>
-              <div className="mt-3 space-y-5">
-                {groupedEmployees.map((group, groupIndex) => (
-                  <div key={group.position} className={groupIndex ? "space-y-3 border-t border-rose-200/20 pt-3" : "space-y-3"}>
-                    <p className="text-[11px] uppercase tracking-[0.2em] text-rose-200">{group.position}</p>
-                    {group.items.map((employee) => (
-                      <div
-                        key={employee.id}
-                        className="flex items-center justify-between rounded-2xl border border-rose-200/30 bg-rose-950/40 px-4 py-3 text-sm"
-                      >
-                        <div>
-                          <div className="font-semibold text-rose-50">{employee.firstName} {employee.lastName}</div>
-                          <div className="text-[12px] uppercase tracking-wide text-rose-100/70">{employee.position}</div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteEmployee(employee.id)}
-                          className="rounded-full border border-red-300/60 bg-red-500/20 px-3 py-1 text-[11px] font-semibold text-red-50 transition hover:bg-red-500/40"
-                        >
-                          Usuń
-                        </button>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Lista pracowników</h3>
+                <span className="text-[11px] uppercase tracking-[0.2em] text-rose-200">Kliknij aby usunąć</span>
+              </div>
+              <div className="mt-3 max-h-[28rem] space-y-4 overflow-y-auto pr-1">
+                {groupedEmployees.map((group, groupIndex) => {
+                  const theme = getPositionTheme(group.position);
+
+                  return (
+                    <div
+                      key={group.position}
+                      className={`space-y-3 rounded-2xl border p-3 ${
+                        groupIndex ? "border-rose-200/10" : ""
+                      } ${theme.containerBg} ${theme.containerBorder}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2 w-2 rounded-full ${theme.accentDot}`} />
+                        <p className={`text-[11px] uppercase tracking-[0.2em] ${theme.labelText}`}>{group.position}</p>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${theme.labelPill}`}>
+                          {group.items.length} os.
+                        </span>
                       </div>
-                    ))}
-                  </div>
-                ))}
+                      <div className="space-y-2">
+                        {group.items.map((employee) => (
+                          <button
+                            key={employee.id}
+                            type="button"
+                            onClick={() => handleDeleteEmployee(employee.id)}
+                            disabled={deletingEmployeeId === employee.id}
+                            className={`group flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm shadow-inner transition ${theme.rowBg} ${theme.rowBorder} hover:brightness-110 disabled:opacity-70`}
+                          >
+                            <div>
+                              <div className="font-semibold text-rose-50">{employee.firstName} {employee.lastName}</div>
+                              <div className="text-[12px] uppercase tracking-wide text-rose-100/70">{employee.position}</div>
+                            </div>
+                            <span className="rounded-full border border-red-300/60 bg-red-500/20 px-3 py-1 text-[11px] font-semibold text-red-50 transition group-hover:bg-red-500/30">
+                              {deletingEmployeeId === employee.id ? "Usuwanie..." : "Usuń"}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
 
                 {!employees.length && (
                   <p className="text-sm text-rose-100/80">Brak pracowników do wyświetlenia.</p>
