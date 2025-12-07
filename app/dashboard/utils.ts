@@ -100,6 +100,31 @@ export function mergeEntriesWithEmployees(
   return combined;
 }
 
+export function normalizeScheduleEntries(
+  entries: Record<string, { shifts?: Record<number, string>; fullName?: string; position?: string }>
+) {
+  const normalized: Record<string, { shifts: Record<number, string>; fullName: string; position: string }> = {};
+
+  Object.entries(entries || {}).forEach(([employeeId, entry]) => {
+    const safeShifts: Record<number, string> = {};
+
+    Object.entries(entry?.shifts || {}).forEach(([dayKey, value]) => {
+      if (!value) return;
+      const numericKey = Number.parseInt(dayKey, 10);
+      if (Number.isNaN(numericKey)) return;
+      safeShifts[numericKey] = value;
+    });
+
+    normalized[employeeId] = {
+      shifts: safeShifts,
+      fullName: (entry?.fullName || "").trim(),
+      position: entry?.position || ""
+    };
+  });
+
+  return normalized;
+}
+
 export type SimpleEmployee = { id: string; firstName: string; lastName: string; position: string; employmentRate?: string };
 
 export function sortEmployees(employees: SimpleEmployee[]): SimpleEmployee[] {
