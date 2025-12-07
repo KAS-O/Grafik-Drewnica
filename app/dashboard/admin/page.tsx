@@ -26,7 +26,8 @@ import {
   groupEmployeesByPosition,
   mergeEntriesWithEmployees,
   sortEmployees,
-  type DayCell
+  type DayCell,
+  type SimpleEmployee
 } from "../utils";
 
 type ShiftValue = string;
@@ -38,11 +39,14 @@ type Position =
   | "Salowa"
   | string;
 
+type EmploymentRate = "1 etat 12h" | "1 etat 8h" | "1/2 etatu" | "3/4 etatu";
+
 type Employee = {
   id: string;
   firstName: string;
   lastName: string;
   position: Position;
+  employmentRate?: EmploymentRate;
   createdAt?: unknown;
 };
 
@@ -71,9 +75,11 @@ const POSITIONS = [
   "Salowa"
 ];
 
+const EMPLOYMENT_RATES: EmploymentRate[] = ["1 etat 12h", "1 etat 8h", "1/2 etatu", "3/4 etatu"];
+
 type ShiftTemplate = "D" | "N" | "1" | "hours" | "clear";
 
-type WardSide = "" | "o" | "r";
+type ShiftAction = ShiftTemplate | "o" | "r" | "k";
 
 function deriveShiftTone(value: string): string {
   if (!value) return "bg-slate-900/50 text-sky-100/70";
@@ -122,16 +128,19 @@ export default function AdminDashboardPage() {
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [scheduleDirty, setScheduleDirty] = useState(false);
   const [status, setStatus] = useState<StatusState>({ type: "", text: "" });
-  const [employeeForm, setEmployeeForm] = useState<Pick<Employee, "firstName" | "lastName" | "position">>({
+  const [employeeForm, setEmployeeForm] = useState<Pick<
+    Employee,
+    "firstName" | "lastName" | "position" | "employmentRate"
+  >>({
     firstName: "",
     lastName: "",
-    position: POSITIONS[0]
+    position: POSITIONS[0],
+    employmentRate: EMPLOYMENT_RATES[0]
   });
   const [formPending, setFormPending] = useState(false);
-  const [shiftTemplate, setShiftTemplate] = useState<ShiftTemplate>("D");
+  const [activeAction, setActiveAction] = useState<ShiftAction>("D");
+  const [primaryShift, setPrimaryShift] = useState<ShiftTemplate>("D");
   const [hoursValue, setHoursValue] = useState("6:10");
-  const [wardSide, setWardSide] = useState<WardSide>("");
-  const [coordinator, setCoordinator] = useState(false);
   const db: Firestore = useMemo(() => getFirestore(app), []);
 
   useEffect(() => {
@@ -151,6 +160,17 @@ export default function AdminDashboardPage() {
   const groupedEmployees = useMemo(() => groupEmployeesByPosition(employees), [employees]);
   const sortedEmployees = useMemo(() => sortEmployees(employees), [employees]);
   const [deletingEmployeeId, setDeletingEmployeeId] = useState<string | null>(null);
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
+  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<Pick<
+    Employee,
+    "firstName" | "lastName" | "position" | "employmentRate"
+  >>({
+    firstName: "",
+    lastName: "",
+    position: POSITIONS[0],
+    employmentRate: EMPLOYMENT_RATES[0]
+  });
 
   useEffect(() => {
     if (!user || !isAdmin) return;
@@ -161,11 +181,16 @@ export default function AdminDashboardPage() {
 
       try {
         const employeesSnap = await getDocs(collection(db, "employees"));
-        const employeeList: Employee[] = employeesSnap.docs.map((docSnap) => ({
-          id: docSnap.id,
-          ...(docSnap.data() as Omit<Employee, "id">)
-        }));
+        const employeeList: Employee[] = employeesSnap.docs.map((docSnap) => {
+          const data = docSnap.data() as Omit<Employee, "id">;
+          return {
+            id: docSnap.id,
+            ...data,
+            employmentRate: (data.employmentRate as EmploymentRate | undefined) ?? EMPLOYMENT_RATES[0]
+          };
+        });
         setEmployees(employeeList);
+        setSelectedEmployeeIds([]);
 
         const scheduleRef = doc(db, "schedules", monthId);
         const scheduleSnap = await getDoc(scheduleRef);
@@ -231,6 +256,7 @@ export default function AdminDashboardPage() {
         firstName: trimmedFirst,
         lastName: trimmedLast,
         position: employeeForm.position,
+        employmentRate: employeeForm.employmentRate,
         createdAt: serverTimestamp()
       };
 
@@ -246,7 +272,12 @@ export default function AdminDashboardPage() {
           position: employeeForm.position
         }
       }));
-      setEmployeeForm({ firstName: "", lastName: "", position: POSITIONS[0] });
+      setEmployeeForm({
+        firstName: "",
+        lastName: "",
+        position: POSITIONS[0],
+        employmentRate: EMPLOYMENT_RATES[0]
+      });
       setStatus({ type: "success", text: "Dodano pracownika." });
     } catch (error) {
       console.error("Nie udało się dodać pracownika:", error);
@@ -278,6 +309,7 @@ export default function AdminDashboardPage() {
 
       setEmployees((prev) => prev.filter((emp) => emp.id !== employeeId));
       setScheduleEntries(remainingEntries);
+      setSelectedEmployeeIds((prev) => prev.filter((id) => id !== employeeId));
       setScheduleDirty(true);
       setStatus({ type: "success", text: "Usunięto pracownika i zaktualizowano grafik." });
     } catch (error) {
@@ -288,19 +320,164 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const handleSelectEmployee = (employeeId: string, checked: boolean) => {
+    setSelectedEmployeeIds((prev) => {
+      if (checked) {
+        return prev.includes(employeeId) ? prev : [...prev, employeeId];
+      }
+      return prev.filter((id) => id !== employeeId);
+    });
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    setSelectedEmployeeIds(checked ? employees.map((emp) => emp.id) : []);
+  };
+
+  const handleStartEdit = (employee: Employee | SimpleEmployee) => {
+    setEditingEmployeeId(employee.id);
+    setEditForm({
+      firstName: employee.firstName,
+      lastName: employee.lastName,
+      position: employee.position,
+      employmentRate: (employee.employmentRate as EmploymentRate | undefined) ?? EMPLOYMENT_RATES[0]
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingEmployeeId(null);
+    setEditForm({
+      firstName: "",
+      lastName: "",
+      position: POSITIONS[0],
+      employmentRate: EMPLOYMENT_RATES[0]
+    });
+  };
+
+  const handleUpdateEmployee = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    if (!editingEmployeeId) return;
+    if (!isAdmin) {
+      setStatus({ type: "error", text: "Tylko administrator może edytować pracowników." });
+      return;
+    }
+
+    const trimmedFirst = editForm.firstName.trim();
+    const trimmedLast = editForm.lastName.trim();
+
+    if (!trimmedFirst || !trimmedLast) {
+      setStatus({ type: "error", text: "Uzupełnij imię i nazwisko." });
+      return;
+    }
+
+    try {
+      setFormPending(true);
+      await setDoc(
+        doc(db, "employees", editingEmployeeId),
+        {
+          firstName: trimmedFirst,
+          lastName: trimmedLast,
+          position: editForm.position,
+          employmentRate: editForm.employmentRate
+        },
+        { merge: true }
+      );
+
+      setEmployees((prev) =>
+        prev.map((emp) =>
+          emp.id === editingEmployeeId
+            ? {
+                ...emp,
+                firstName: trimmedFirst,
+                lastName: trimmedLast,
+                position: editForm.position,
+                employmentRate: editForm.employmentRate
+              }
+            : emp
+        )
+      );
+
+      setScheduleEntries((prev) => ({
+        ...prev,
+        [editingEmployeeId]: {
+          ...(prev[editingEmployeeId] || { shifts: {} }),
+          fullName: `${trimmedFirst} ${trimmedLast}`.trim(),
+          position: editForm.position
+        }
+      }));
+
+      setStatus({ type: "success", text: "Zaktualizowano dane pracownika." });
+      handleCancelEdit();
+    } catch (error) {
+      console.error("Nie udało się zaktualizować pracownika:", error);
+      setStatus({ type: "error", text: "Nie udało się zaktualizować pracownika." });
+    } finally {
+      setFormPending(false);
+    }
+  };
+
+  const handleApplyEmploymentRate = async (rate: EmploymentRate) => {
+    if (!isAdmin) {
+      setStatus({ type: "error", text: "Tylko administrator może edytować pracowników." });
+      return;
+    }
+
+    if (!selectedEmployeeIds.length) {
+      setStatus({ type: "error", text: "Zaznacz co najmniej jedną osobę, aby ustawić etat." });
+      return;
+    }
+
+    try {
+      setFormPending(true);
+      await Promise.all(
+        selectedEmployeeIds.map((employeeId) =>
+          setDoc(doc(db, "employees", employeeId), { employmentRate: rate }, { merge: true })
+        )
+      );
+
+      setEmployees((prev) => prev.map((emp) => (selectedEmployeeIds.includes(emp.id) ? { ...emp, employmentRate: rate } : emp)));
+      setStatus({ type: "success", text: "Zaktualizowano etaty zaznaczonych pracowników." });
+    } catch (error) {
+      console.error("Nie udało się zaktualizować etatów:", error);
+      setStatus({ type: "error", text: "Nie udało się zaktualizować etatów." });
+    } finally {
+      setFormPending(false);
+    }
+  };
+
+  const handleSelectAction = (action: ShiftAction) => {
+    setActiveAction(action);
+    if (action === "D" || action === "N" || action === "1" || action === "hours") {
+      setPrimaryShift(action);
+    }
+  };
+
   const buildShiftValue = (): string | null => {
-    if (shiftTemplate === "clear") return "";
-    if (shiftTemplate === "hours") {
+    if (activeAction === "clear") return "";
+
+    const extras: string[] = [];
+    if (activeAction === "o" || activeAction === "r") {
+      extras.push(activeAction);
+    }
+    if (activeAction === "k") {
+      extras.push("K");
+    }
+
+    const base: ShiftTemplate =
+      activeAction === "D" || activeAction === "N" || activeAction === "1" || activeAction === "hours"
+        ? activeAction
+        : primaryShift;
+
+    if (base === "hours") {
       const normalized = normalizeHours(hoursValue);
       if (!normalized) {
         setStatus({ type: "error", text: "Podaj poprawny czas w formacie GG:MM (np. 6:10)." });
         return null;
       }
-      return `${normalized}${wardSide ? ` ${wardSide}` : ""}${coordinator ? " K" : ""}`.trim();
+      return `${normalized}${extras.length ? ` ${extras.join(" ")}` : ""}`.trim();
     }
 
-    const base = shiftTemplate;
-    return `${base}${wardSide ? ` ${wardSide}` : ""}${coordinator ? " K" : ""}`.trim();
+    return `${base}${extras.length ? ` ${extras.join(" ")}` : ""}`.trim();
   };
 
   const handleApplyShift = (employeeId: string, dayNumber: number) => {
@@ -490,6 +667,22 @@ export default function AdminDashboardPage() {
                       ))}
                     </select>
                   </div>
+                  <div className="space-y-1">
+                    <label className="text-xs uppercase tracking-wide text-rose-100">Etat</label>
+                    <select
+                      value={employeeForm.employmentRate}
+                      onChange={(e) =>
+                        setEmployeeForm((prev) => ({ ...prev, employmentRate: e.target.value as EmploymentRate }))
+                      }
+                      className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                    >
+                      {EMPLOYMENT_RATES.map((rate) => (
+                        <option key={rate} value={rate} className="bg-slate-900">
+                          {rate}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <button
                     type="submit"
                     disabled={formPending}
@@ -506,10 +699,38 @@ export default function AdminDashboardPage() {
             </div>
 
             <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Lista pracowników</h3>
-                <span className="text-[11px] uppercase tracking-[0.2em] text-rose-200">Kliknij aby usunąć</span>
+                <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-rose-200">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={!!employees.length && selectedEmployeeIds.length === employees.length}
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                      className="h-4 w-4 rounded border-rose-200 bg-rose-950/40 text-rose-400 focus:ring-rose-300"
+                    />
+                    <span>Wybierz wszystkich</span>
+                  </label>
+                  <span className="rounded-full border border-rose-200/40 bg-rose-900/60 px-2 py-0.5 text-[10px]">
+                    Wybrano {selectedEmployeeIds.length}
+                  </span>
+                </div>
               </div>
+
+              <div className="mt-2 flex flex-wrap gap-2 text-[12px]">
+                {EMPLOYMENT_RATES.map((rate) => (
+                  <button
+                    key={rate}
+                    type="button"
+                    onClick={() => handleApplyEmploymentRate(rate)}
+                    disabled={formPending}
+                    className="rounded-full border border-rose-200/40 bg-rose-800/60 px-3 py-1 font-semibold text-rose-50 transition hover:brightness-110 disabled:opacity-60"
+                  >
+                    Ustaw {rate}
+                  </button>
+                ))}
+              </div>
+
               <div className="mt-3 max-h-[28rem] space-y-4 overflow-y-auto pr-1">
                 {groupedEmployees.map((group, groupIndex) => {
                   const theme = getPositionTheme(group.position);
@@ -530,21 +751,39 @@ export default function AdminDashboardPage() {
                       </div>
                       <div className="space-y-2">
                         {group.items.map((employee) => (
-                          <button
+                          <div
                             key={employee.id}
-                            type="button"
-                            onClick={() => handleDeleteEmployee(employee.id)}
-                            disabled={deletingEmployeeId === employee.id}
-                            className={`group flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left text-sm shadow-inner transition ${theme.rowBg} ${theme.rowBorder} hover:brightness-110 disabled:opacity-70`}
+                            className={`flex w-full flex-wrap items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm shadow-inner transition ${theme.rowBg} ${theme.rowBorder}`}
                           >
-                            <div>
+                            <input
+                              type="checkbox"
+                              checked={selectedEmployeeIds.includes(employee.id)}
+                              onChange={(e) => handleSelectEmployee(employee.id, e.target.checked)}
+                              className="h-4 w-4 rounded border-rose-200 bg-rose-950/50 text-rose-300 focus:ring-rose-300"
+                            />
+                            <div className="min-w-[12rem] flex-1">
                               <div className="font-semibold text-rose-50">{employee.firstName} {employee.lastName}</div>
                               <div className="text-[12px] uppercase tracking-wide text-rose-100/70">{employee.position}</div>
+                              <div className="text-[11px] text-rose-100/70">{employee.employmentRate || "brak danych"}</div>
                             </div>
-                            <span className="rounded-full border border-red-300/60 bg-red-500/20 px-3 py-1 text-[11px] font-semibold text-red-50 transition group-hover:bg-red-500/30">
-                              {deletingEmployeeId === employee.id ? "Usuwanie..." : "Usuń"}
-                            </span>
-                          </button>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleStartEdit(employee)}
+                                className="rounded-full border border-rose-200/50 bg-rose-50/10 px-3 py-1 text-[11px] font-semibold text-rose-50 transition hover:brightness-110"
+                              >
+                                Edytuj
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteEmployee(employee.id)}
+                                disabled={deletingEmployeeId === employee.id}
+                                className="rounded-full border border-red-300/60 bg-red-500/20 px-3 py-1 text-[11px] font-semibold text-red-50 transition hover:bg-red-500/30 disabled:opacity-70"
+                              >
+                                {deletingEmployeeId === employee.id ? "Usuwanie..." : "Usuń"}
+                              </button>
+                            </div>
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -557,6 +796,89 @@ export default function AdminDashboardPage() {
               </div>
             </div>
           </div>
+        </section>
+
+        <section className="rounded-3xl border border-rose-300/30 bg-rose-900/30 p-5 shadow-inner">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Edycja pracownika</h3>
+              <p className="text-xs text-rose-100/80">Wybierz osobę z listy i zaktualizuj jej dane.</p>
+            </div>
+            <span className="rounded-full border border-rose-200/50 bg-rose-800/50 px-3 py-1 text-[11px] font-semibold text-rose-100">
+              {editingEmployeeId ? "Tryb edycji" : "Brak wybranej osoby"}
+            </span>
+          </div>
+
+          <form onSubmit={handleUpdateEmployee} className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="space-y-1">
+              <label className="text-xs uppercase tracking-wide text-rose-100">Imię</label>
+              <input
+                type="text"
+                value={editForm.firstName}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, firstName: e.target.value }))}
+                disabled={!editingEmployeeId}
+                className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs uppercase tracking-wide text-rose-100">Nazwisko</label>
+              <input
+                type="text"
+                value={editForm.lastName}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, lastName: e.target.value }))}
+                disabled={!editingEmployeeId}
+                className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs uppercase tracking-wide text-rose-100">Stanowisko</label>
+              <select
+                value={editForm.position}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, position: e.target.value as Position }))}
+                disabled={!editingEmployeeId}
+                className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {POSITIONS.map((pos) => (
+                  <option key={pos} value={pos} className="bg-slate-900">
+                    {pos}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs uppercase tracking-wide text-rose-100">Etat</label>
+              <select
+                value={editForm.employmentRate}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, employmentRate: e.target.value as EmploymentRate }))}
+                disabled={!editingEmployeeId}
+                className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {EMPLOYMENT_RATES.map((rate) => (
+                  <option key={rate} value={rate} className="bg-slate-900">
+                    {rate}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 md:col-span-2">
+              <button
+                type="submit"
+                disabled={!editingEmployeeId || formPending}
+                className="rounded-full bg-gradient-to-r from-rose-400 via-rose-500 to-rose-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {formPending ? "Zapisywanie..." : "Zapisz zmiany"}
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelEdit}
+                className="rounded-full border border-rose-200/50 bg-rose-50/5 px-4 py-2 text-sm font-semibold text-rose-50 transition hover:brightness-110"
+              >
+                Anuluj
+              </button>
+              <p className="text-xs text-rose-100/70">Edycja zapisuje dane bezpośrednio w bazie i aktualizuje grafik.</p>
+            </div>
+          </form>
         </section>
 
         <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
@@ -579,22 +901,22 @@ export default function AdminDashboardPage() {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setShiftTemplate("D")}
-                  className={`rounded-full px-3 py-1 ${shiftTemplate === "D" ? "bg-amber-400 text-slate-900 shadow" : "border border-sky-200/40 text-sky-100"}`}
+                  onClick={() => handleSelectAction("D")}
+                  className={`rounded-full px-3 py-1 ${activeAction === "D" ? "bg-amber-400 text-slate-900 shadow" : "border border-sky-200/40 text-sky-100"}`}
                 >
                   D (Dzień)
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShiftTemplate("N")}
-                  className={`rounded-full px-3 py-1 ${shiftTemplate === "N" ? "bg-sky-300 text-slate-900 shadow" : "border border-sky-200/40 text-sky-100"}`}
+                  onClick={() => handleSelectAction("N")}
+                  className={`rounded-full px-3 py-1 ${activeAction === "N" ? "bg-sky-300 text-slate-900 shadow" : "border border-sky-200/40 text-sky-100"}`}
                 >
                   N (Noc)
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShiftTemplate("1")}
-                  className={`rounded-full px-3 py-1 ${shiftTemplate === "1" ? "bg-emerald-300 text-emerald-950 shadow" : "border border-sky-200/40 text-sky-100"}`}
+                  onClick={() => handleSelectAction("1")}
+                  className={`rounded-full px-3 py-1 ${activeAction === "1" ? "bg-emerald-300 text-emerald-950 shadow" : "border border-sky-200/40 text-sky-100"}`}
                 >
                   1 (8h / Pn-Pt)
                 </button>
@@ -603,22 +925,22 @@ export default function AdminDashboardPage() {
                   <input
                     value={hoursValue}
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setHoursValue(e.target.value)}
-                    onFocus={() => setShiftTemplate("hours")}
+                    onFocus={() => handleSelectAction("hours")}
                     className="w-20 rounded-lg border border-sky-200/40 bg-slate-900 px-2 py-1 text-xs text-sky-50 outline-none focus:border-sky-200 focus:ring-2 focus:ring-sky-300/60"
                     placeholder="6:10"
                   />
                   <button
                     type="button"
-                    onClick={() => setShiftTemplate("hours")}
-                    className={`rounded-full px-2 py-1 text-[11px] ${shiftTemplate === "hours" ? "bg-sky-200 text-slate-900" : "bg-slate-800 text-sky-100"}`}
+                    onClick={() => handleSelectAction("hours")}
+                    className={`rounded-full px-2 py-1 text-[11px] ${activeAction === "hours" ? "bg-sky-200 text-slate-900" : "bg-slate-800 text-sky-100"}`}
                   >
                     Ustaw
                   </button>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShiftTemplate("clear")}
-                  className={`rounded-full px-3 py-1 ${shiftTemplate === "clear" ? "bg-slate-200 text-slate-900 shadow" : "border border-sky-200/40 text-sky-100"}`}
+                  onClick={() => handleSelectAction("clear")}
+                  className={`rounded-full px-3 py-1 ${activeAction === "clear" ? "bg-slate-200 text-slate-900 shadow" : "border border-sky-200/40 text-sky-100"}`}
                 >
                   Wyczyść pole
                 </button>
@@ -630,22 +952,22 @@ export default function AdminDashboardPage() {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setWardSide((prev) => (prev === "o" ? "" : "o"))}
-                  className={`rounded-full px-3 py-1 ${wardSide === "o" ? "bg-emerald-300 text-emerald-950" : "border border-sky-200/40 text-sky-100"}`}
+                  onClick={() => handleSelectAction("o")}
+                  className={`rounded-full px-3 py-1 ${activeAction === "o" ? "bg-emerald-300 text-emerald-950" : "border border-sky-200/40 text-sky-100"}`}
                 >
                   o (ostra)
                 </button>
                 <button
                   type="button"
-                  onClick={() => setWardSide((prev) => (prev === "r" ? "" : "r"))}
-                  className={`rounded-full px-3 py-1 ${wardSide === "r" ? "bg-purple-300 text-purple-950" : "border border-sky-200/40 text-sky-100"}`}
+                  onClick={() => handleSelectAction("r")}
+                  className={`rounded-full px-3 py-1 ${activeAction === "r" ? "bg-purple-300 text-purple-950" : "border border-sky-200/40 text-sky-100"}`}
                 >
                   r (rehabilitacja)
                 </button>
                 <button
                   type="button"
-                  onClick={() => setCoordinator((prev) => !prev)}
-                  className={`rounded-full px-3 py-1 ${coordinator ? "bg-amber-300 text-amber-950" : "border border-sky-200/40 text-sky-100"}`}
+                  onClick={() => handleSelectAction("k")}
+                  className={`rounded-full px-3 py-1 ${activeAction === "k" ? "bg-amber-300 text-amber-950" : "border border-sky-200/40 text-sky-100"}`}
                 >
                   K (koordynujący)
                 </button>
@@ -829,20 +1151,24 @@ export default function AdminDashboardPage() {
               <span className="rounded-full bg-sky-400/10 px-3 py-1 text-[11px] font-semibold text-sky-100">{employees.length}</span>
             </div>
 
-            <div className="space-y-3 text-sm text-sky-100/90">
-              <div className="rounded-2xl border border-sky-200/30 bg-slate-900/60 px-4 py-3">
-                <p className="text-xs uppercase tracking-wide text-sky-200">Wybrany tryb</p>
-                <p className="mt-1 text-base font-semibold text-sky-50">
-                  {shiftTemplate === "D" && "Dzień (D)"}
-                  {shiftTemplate === "N" && "Noc (N)"}
-                  {shiftTemplate === "1" && "1 etat (8h)"}
-                  {shiftTemplate === "hours" && `Godziny: ${hoursValue}`}
-                  {shiftTemplate === "clear" && "Czyszczenie pola"}
-                </p>
-                <p className="mt-2 text-xs text-sky-100/70">
-                  Oznaczenia dodatkowe: {wardSide || "brak"} {coordinator ? ", K" : ""}
-                </p>
-              </div>
+              <div className="space-y-3 text-sm text-sky-100/90">
+                <div className="rounded-2xl border border-sky-200/30 bg-slate-900/60 px-4 py-3">
+                  <p className="text-xs uppercase tracking-wide text-sky-200">Wybrany tryb</p>
+                  <p className="mt-1 text-base font-semibold text-sky-50">
+                    {activeAction === "D" && "Dzień (D)"}
+                    {activeAction === "N" && "Noc (N)"}
+                    {activeAction === "1" && "1 etat (8h)"}
+                    {activeAction === "hours" && `Godziny: ${hoursValue}`}
+                    {activeAction === "clear" && "Czyszczenie pola"}
+                    {(activeAction === "o" || activeAction === "r") &&
+                      `Dodatek: ${activeAction} + ${primaryShift === "hours" ? `godziny (${hoursValue})` : primaryShift}`}
+                    {activeAction === "k" &&
+                      `Dodatek: K + ${primaryShift === "hours" ? `godziny (${hoursValue})` : primaryShift}`}
+                  </p>
+                  <p className="mt-2 text-xs text-sky-100/70">
+                    Bazowy dyżur: {primaryShift === "hours" ? `godziny (${hoursValue})` : primaryShift}
+                  </p>
+                </div>
 
               <div className="rounded-2xl border border-sky-200/30 bg-slate-900/60 px-4 py-3">
                 <p className="text-xs uppercase tracking-wide text-sky-200">Święta własne</p>
