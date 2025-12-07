@@ -23,6 +23,7 @@ type Employee = {
   firstName: string;
   lastName: string;
   position: string;
+  employmentRate?: string;
   createdAt?: unknown;
 };
 
@@ -93,10 +94,14 @@ export default function DashboardPage() {
 
       try {
         const employeesSnap = await getDocs(collection(db, "employees"));
-        const employeeList: Employee[] = employeesSnap.docs.map((docSnap) => ({
-          id: docSnap.id,
-          ...(docSnap.data() as Omit<Employee, "id">)
-        }));
+        const employeeList: Employee[] = employeesSnap.docs.map((docSnap) => {
+          const data = docSnap.data() as Omit<Employee, "id">;
+          return {
+            id: docSnap.id,
+            ...data,
+            employmentRate: data.employmentRate || "1 etat 12h"
+          };
+        });
         setEmployees(employeeList);
 
         const scheduleRef = doc(db, "schedules", monthId);

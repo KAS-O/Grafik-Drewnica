@@ -100,7 +100,7 @@ export function mergeEntriesWithEmployees(
   return combined;
 }
 
-export type SimpleEmployee = { id: string; firstName: string; lastName: string; position: string };
+export type SimpleEmployee = { id: string; firstName: string; lastName: string; position: string; employmentRate?: string };
 
 export function sortEmployees(employees: SimpleEmployee[]): SimpleEmployee[] {
   const positionRank = (position: string) => {
