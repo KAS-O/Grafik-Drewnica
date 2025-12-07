@@ -25,6 +25,7 @@ import {
   getPositionTheme,
   groupEmployeesByPosition,
   mergeEntriesWithEmployees,
+  normalizeScheduleEntries,
   sortEmployees,
   type DayCell,
   type SimpleEmployee
@@ -195,7 +196,7 @@ export default function AdminDashboardPage() {
         const scheduleRef = doc(db, "schedules", monthId);
         const scheduleSnap = await getDoc(scheduleRef);
         const scheduleData = (scheduleSnap.exists() ? scheduleSnap.data() : {}) as ScheduleDocument;
-        const loadedEntries = (scheduleData.entries as ScheduleEntries) || {};
+        const loadedEntries = normalizeScheduleEntries((scheduleData.entries as ScheduleEntries) || {});
 
         setCustomHolidays(scheduleData.customHolidays || []);
         setScheduleEntries(mergeEntriesWithEmployees(loadedEntries, employeeList));
@@ -356,6 +357,8 @@ export default function AdminDashboardPage() {
   const handleUpdateEmployee = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
+    setStatus({ type: "", text: "" });
+
     if (!editingEmployeeId) return;
     if (!isAdmin) {
       setStatus({ type: "error", text: "Tylko administrator może edytować pracowników." });
@@ -429,6 +432,7 @@ export default function AdminDashboardPage() {
 
     try {
       setFormPending(true);
+      setStatus({ type: "", text: "" });
       await Promise.all(
         selectedEmployeeIds.map((employeeId) =>
           setDoc(doc(db, "employees", employeeId), { employmentRate: rate }, { merge: true })
@@ -544,11 +548,13 @@ export default function AdminDashboardPage() {
     setScheduleSaving(true);
 
     try {
+      const sanitizedEntries = normalizeScheduleEntries(scheduleEntries);
+
       await setDoc(
         doc(db, "schedules", monthId),
         {
           month: monthId,
-          entries: scheduleEntries,
+          entries: sanitizedEntries,
           customHolidays,
           updatedAt: serverTimestamp()
         },
@@ -569,8 +575,8 @@ export default function AdminDashboardPage() {
 
   return (
     <main className="min-h-screen bg-slate-950 px-3 py-6 text-sky-50">
-      <div className="mx-auto w-full max-w-[1600px] overflow-x-auto">
-        <div className="flex w-full min-w-[1200px] flex-col gap-6">
+      <div className="mx-auto w-full max-w-[1600px]">
+        <div className="flex w-full flex-col gap-6">
         <header className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-rose-200/30 bg-rose-950/60 p-4 shadow-lg">
           <div>
             <p className="text-xs uppercase tracking-wide text-rose-200">Panel administracji</p>
