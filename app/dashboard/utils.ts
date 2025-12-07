@@ -10,6 +10,13 @@ export const POLISH_HOLIDAYS = new Set([
   "12-26"
 ]);
 
+export const POSITION_ORDER = [
+  "Pielęgniarka / Pielęgniarz",
+  "Opiekun Medyczny",
+  "Sanitariusz",
+  "Salowa"
+];
+
 export type DayCell = {
   dayNumber: number;
   weekday: number;
@@ -91,6 +98,42 @@ export function mergeEntriesWithEmployees(
   });
 
   return combined;
+}
+
+export type SimpleEmployee = { id: string; firstName: string; lastName: string; position: string };
+
+export function sortEmployees(employees: SimpleEmployee[]): SimpleEmployee[] {
+  const positionRank = (position: string) => {
+    const idx = POSITION_ORDER.findIndex((name) => name === position);
+    return idx === -1 ? POSITION_ORDER.length : idx;
+  };
+
+  return [...employees].sort((a, b) => {
+    const positionDiff = positionRank(a.position) - positionRank(b.position);
+    if (positionDiff !== 0) return positionDiff;
+
+    const lastNameDiff = a.lastName.localeCompare(b.lastName, "pl");
+    if (lastNameDiff !== 0) return lastNameDiff;
+
+    return a.firstName.localeCompare(b.firstName, "pl");
+  });
+}
+
+export function groupEmployeesByPosition(employees: SimpleEmployee[]) {
+  const sorted = sortEmployees(employees);
+  const groups: { position: string; items: SimpleEmployee[] }[] = [];
+
+  sorted.forEach((employee) => {
+    const lastGroup = groups[groups.length - 1];
+    if (lastGroup && lastGroup.position === employee.position) {
+      lastGroup.items.push(employee);
+      return;
+    }
+
+    groups.push({ position: employee.position, items: [employee] });
+  });
+
+  return groups;
 }
 
 export function getDayCellClasses(day: DayCell, isEditable = false): string {
