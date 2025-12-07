@@ -136,6 +136,73 @@ export function groupEmployeesByPosition(employees: SimpleEmployee[]) {
   return groups;
 }
 
+export function getPositionTheme(position: string) {
+  const normalized = position.toLowerCase();
+
+  if (normalized.includes("pielęgniarka")) {
+    return {
+      containerBg: "bg-sky-900/40",
+      containerBorder: "border-sky-200/40",
+      labelText: "text-sky-50",
+      labelPill: "bg-sky-300/20 text-sky-100",
+      accentDot: "bg-sky-200",
+      accentBorder: "border-l-4 border-l-sky-300/80",
+      rowBg: "bg-sky-950/50",
+      rowBorder: "border-sky-200/30"
+    };
+  }
+
+  if (normalized.includes("opiekun")) {
+    return {
+      containerBg: "bg-violet-900/40",
+      containerBorder: "border-violet-200/40",
+      labelText: "text-violet-50",
+      labelPill: "bg-violet-300/20 text-violet-100",
+      accentDot: "bg-violet-200",
+      accentBorder: "border-l-4 border-l-violet-200/70",
+      rowBg: "bg-violet-950/50",
+      rowBorder: "border-violet-200/30"
+    };
+  }
+
+  if (normalized.includes("sanitariusz")) {
+    return {
+      containerBg: "bg-gradient-to-r from-rose-950 via-red-950 to-slate-950",
+      containerBorder: "border-red-500/50",
+      labelText: "text-red-50",
+      labelPill: "bg-red-700/30 text-red-50",
+      accentDot: "bg-red-300",
+      accentBorder: "border-l-4 border-l-red-400/80",
+      rowBg: "bg-gradient-to-r from-rose-950/80 via-red-950/60 to-slate-950/80",
+      rowBorder: "border-red-500/40"
+    };
+  }
+
+  if (normalized.includes("salowa")) {
+    return {
+      containerBg: "bg-orange-900/30",
+      containerBorder: "border-orange-200/40",
+      labelText: "text-orange-50",
+      labelPill: "bg-orange-300/20 text-orange-100",
+      accentDot: "bg-orange-200",
+      accentBorder: "border-l-4 border-l-orange-200/70",
+      rowBg: "bg-orange-950/40",
+      rowBorder: "border-orange-200/30"
+    };
+  }
+
+  return {
+    containerBg: "bg-slate-900/40",
+    containerBorder: "border-slate-300/30",
+    labelText: "text-slate-100",
+    labelPill: "bg-slate-200/20 text-slate-50",
+    accentDot: "bg-slate-100",
+    accentBorder: "border-l-4 border-l-slate-200/70",
+    rowBg: "bg-slate-950/50",
+    rowBorder: "border-slate-200/30"
+  };
+}
+
 export function getDayCellClasses(day: DayCell, isEditable = false): string {
   const padding = isEditable ? "px-1.5 py-1" : "px-2 py-2";
 
