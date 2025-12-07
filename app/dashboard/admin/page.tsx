@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import {
@@ -378,7 +378,8 @@ export default function AdminDashboardPage() {
           firstName: trimmedFirst,
           lastName: trimmedLast,
           position: editForm.position,
-          employmentRate: editForm.employmentRate
+          employmentRate: editForm.employmentRate,
+          updatedAt: serverTimestamp()
         },
         { merge: true }
       );
@@ -431,7 +432,11 @@ export default function AdminDashboardPage() {
       setFormPending(true);
       await Promise.all(
         selectedEmployeeIds.map((employeeId) =>
-          setDoc(doc(db, "employees", employeeId), { employmentRate: rate }, { merge: true })
+          setDoc(
+            doc(db, "employees", employeeId),
+            { employmentRate: rate, updatedAt: serverTimestamp() },
+            { merge: true }
+          )
         )
       );
 
@@ -488,6 +493,9 @@ export default function AdminDashboardPage() {
 
     setScheduleEntries((prev) => {
       const current = prev[employeeId] || { shifts: {} };
+      const employee = employees.find((emp) => emp.id === employeeId);
+      const fullName = employee ? `${employee.firstName} ${employee.lastName}`.trim() : current.fullName || "";
+      const position = employee?.position || current.position || "";
       const updatedShifts = { ...current.shifts };
 
       if (value) {
@@ -501,11 +509,49 @@ export default function AdminDashboardPage() {
         ...prev,
         [employeeId]: {
           ...current,
+          fullName,
+          position,
           shifts: updatedShifts
         }
       };
     });
   };
+
+  const buildPersistedEntries = useCallback(() => {
+    const employeeMap = new Map(employees.map((emp) => [emp.id, emp]));
+
+    const sanitized: ScheduleEntries = {};
+
+    Object.entries(scheduleEntries).forEach(([employeeId, entry]) => {
+      const employee = employeeMap.get(employeeId);
+      const fullName = employee
+        ? `${employee.firstName} ${employee.lastName}`.trim()
+        : entry?.fullName?.trim() || "";
+      const position = employee?.position || entry?.position || "";
+
+      const shifts: Record<number, string> = {};
+      Object.entries(entry?.shifts || {}).forEach(([dayKey, shiftValue]) => {
+        if (!shiftValue) return;
+        const dayNumber = Number(dayKey);
+        if (Number.isNaN(dayNumber)) return;
+        shifts[dayNumber] = shiftValue;
+      });
+
+      sanitized[employeeId] = { shifts, fullName, position };
+    });
+
+    employees.forEach((employee) => {
+      if (!sanitized[employee.id]) {
+        sanitized[employee.id] = {
+          shifts: {},
+          fullName: `${employee.firstName} ${employee.lastName}`.trim(),
+          position: employee.position
+        };
+      }
+    });
+
+    return sanitized;
+  }, [employees, scheduleEntries]);
 
   const handleToggleHoliday = (dayNumber: number) => {
     setCustomHolidays((prev) => {
@@ -544,17 +590,20 @@ export default function AdminDashboardPage() {
     setScheduleSaving(true);
 
     try {
+      const entriesToPersist = buildPersistedEntries();
+
       await setDoc(
         doc(db, "schedules", monthId),
         {
           month: monthId,
-          entries: scheduleEntries,
+          entries: entriesToPersist,
           customHolidays,
           updatedAt: serverTimestamp()
         },
         { merge: true }
       );
 
+      setScheduleEntries(entriesToPersist);
       setScheduleDirty(false);
       setStatus({ type: "success", text: "Grafik zapisany." });
     } catch (error) {
@@ -569,8 +618,8 @@ export default function AdminDashboardPage() {
 
   return (
     <main className="min-h-screen bg-slate-950 px-3 py-6 text-sky-50">
-      <div className="mx-auto w-full max-w-[1600px] overflow-x-auto">
-        <div className="flex w-full min-w-[1200px] flex-col gap-6">
+      <div className="mx-auto w-full max-w-[1600px]">
+        <div className="flex w-full flex-col gap-6">
         <header className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-rose-200/30 bg-rose-950/60 p-4 shadow-lg">
           <div>
             <p className="text-xs uppercase tracking-wide text-rose-200">Panel administracji</p>
