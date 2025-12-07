@@ -20,6 +20,21 @@ export type DayCell = {
   isCustomHoliday: boolean;
 };
 
+export type WardSide = "" | "o" | "r";
+
+export type ParsedShift = {
+  baseLabel: string;
+  wardSide: WardSide;
+  coordinator: boolean;
+};
+
+export const POSITIONS = [
+  "Pielęgniarka / Pielęgniarz",
+  "Opiekun Medyczny",
+  "Sanitariusz",
+  "Salowa"
+] as const;
+
 const WEEKDAYS = [
   "Niedziela",
   "Poniedziałek",
@@ -105,4 +120,60 @@ export function getDayCellClasses(day: DayCell, isEditable = false): string {
   }
 
   return `${padding} bg-slate-900/40 text-sky-50 border border-sky-200/20`;
+}
+
+export function deriveShiftTone(value: string): string {
+  if (!value) return "bg-slate-900/50 text-sky-100/70";
+  if (value.startsWith("N")) return "bg-sky-300/90 text-slate-950";
+  if (value.startsWith("D")) return "bg-amber-300/90 text-slate-950";
+  if (value.startsWith("1")) return "bg-emerald-200/90 text-emerald-950";
+  if (/^\d/.test(value) || value.includes(":")) return "bg-amber-200/90 text-slate-950";
+  return "bg-slate-200/90 text-slate-900";
+}
+
+export function parseShiftValue(value: string): ParsedShift {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  let wardSide: WardSide = "";
+  let coordinator = false;
+  const labelParts: string[] = [];
+
+  parts.forEach((part) => {
+    const lower = part.toLowerCase();
+    if (lower === "o") {
+      wardSide = "o";
+      return;
+    }
+    if (lower === "r") {
+      wardSide = "r";
+      return;
+    }
+    if (lower === "k") {
+      coordinator = true;
+      return;
+    }
+    labelParts.push(part);
+  });
+
+  return {
+    baseLabel: labelParts.join(" "),
+    wardSide,
+    coordinator
+  };
+}
+
+export function sortEmployeesByPosition<
+  T extends { id: string; firstName: string; lastName: string; position: string }
+>(employees: T[]): T[] {
+  const order = new Map<string, number>(POSITIONS.map((pos, index) => [pos, index]));
+
+  return [...employees].sort((a, b) => {
+    const orderA = order.has(a.position) ? order.get(a.position)! : POSITIONS.length + 1;
+    const orderB = order.has(b.position) ? order.get(b.position)! : POSITIONS.length + 1;
+
+    if (orderA !== orderB) return orderA - orderB;
+
+    const lastCmp = a.lastName.localeCompare(b.lastName, "pl", { sensitivity: "base" });
+    if (lastCmp !== 0) return lastCmp;
+    return a.firstName.localeCompare(b.firstName, "pl", { sensitivity: "base" });
+  });
 }

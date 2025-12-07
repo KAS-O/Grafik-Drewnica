@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import {
@@ -17,16 +17,23 @@ import {
 } from "firebase/firestore";
 import { auth, app } from "../../../lib/firebase";
 import { useAuth } from "../../../context/AuthContext";
-import { buildDays, getDayCellClasses, getMonthKey, getMonthLabel, mergeEntriesWithEmployees, type DayCell } from "../utils";
+import {
+  POSITIONS,
+  buildDays,
+  deriveShiftTone,
+  getDayCellClasses,
+  getMonthKey,
+  getMonthLabel,
+  mergeEntriesWithEmployees,
+  parseShiftValue,
+  sortEmployeesByPosition,
+  type DayCell,
+  type WardSide
+} from "../utils";
 
 type ShiftValue = string;
 
-type Position =
-  | "Pielęgniarka / Pielęgniarz"
-  | "Opiekun Medyczny"
-  | "Sanitariusz"
-  | "Salowa"
-  | string;
+type Position = (typeof POSITIONS)[number] | string;
 
 type Employee = {
   id: string;
@@ -54,25 +61,7 @@ type ScheduleDocument = {
   customHolidays?: number[];
 };
 
-const POSITIONS = [
-  "Pielęgniarka / Pielęgniarz",
-  "Opiekun Medyczny",
-  "Sanitariusz",
-  "Salowa"
-];
-
 type ShiftTemplate = "D" | "N" | "1" | "hours" | "clear";
-
-type WardSide = "" | "o" | "r";
-
-function deriveShiftTone(value: string): string {
-  if (!value) return "bg-slate-900/50 text-sky-100/70";
-  if (value.startsWith("N")) return "bg-sky-300/90 text-slate-950";
-  if (value.startsWith("D")) return "bg-amber-300/90 text-slate-950";
-  if (value.startsWith("1")) return "bg-emerald-200/90 text-emerald-950";
-  if (/^\d/.test(value) || value.includes(":")) return "bg-amber-200/90 text-slate-950";
-  return "bg-slate-200/90 text-slate-900";
-}
 
 function normalizeHours(raw: string): string | null {
   const trimmed = raw.trim();
@@ -109,6 +98,7 @@ export default function AdminDashboardPage() {
   const [hoursValue, setHoursValue] = useState("6:10");
   const [wardSide, setWardSide] = useState<WardSide>("");
   const [coordinator, setCoordinator] = useState(false);
+  const [holidayInput, setHolidayInput] = useState("");
   const db: Firestore = useMemo(() => getFirestore(app), []);
 
   useEffect(() => {
@@ -125,6 +115,20 @@ export default function AdminDashboardPage() {
   const monthId = useMemo(() => getMonthKey(currentMonth), [currentMonth]);
   const customHolidaySet = useMemo(() => new Set(customHolidays), [customHolidays]);
   const days: DayCell[] = useMemo(() => buildDays(currentMonth, customHolidaySet), [currentMonth, customHolidaySet]);
+  const sortedEmployees = useMemo(() => sortEmployeesByPosition(employees), [employees]);
+  const groupedEmployees = useMemo(
+    () =>
+      sortedEmployees.reduce<{ position: string; members: Employee[] }[]>((acc, employee) => {
+        const existing = acc.find((group) => group.position === employee.position);
+        if (existing) {
+          existing.members.push(employee);
+          return acc;
+        }
+
+        return [...acc, { position: employee.position, members: [employee] }];
+      }, []),
+    [sortedEmployees]
+  );
 
   useEffect(() => {
     if (!user || !isAdmin) return;
@@ -237,14 +241,20 @@ export default function AdminDashboardPage() {
 
     try {
       await deleteDoc(doc(db, "employees", employeeId));
+      const updatedEntries = { ...scheduleEntries };
+      delete updatedEntries[employeeId];
+
       setEmployees((prev) => prev.filter((emp) => emp.id !== employeeId));
-      setScheduleEntries((prev) => {
-        const updated = { ...prev };
-        delete updated[employeeId];
-        setScheduleDirty(true);
-        return updated;
-      });
-      setStatus({ type: "success", text: "Usunięto pracownika." });
+      setScheduleEntries(updatedEntries);
+
+      await setDoc(
+        doc(db, "schedules", monthId),
+        { month: monthId, entries: updatedEntries, customHolidays, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+
+      setScheduleDirty(false);
+      setStatus({ type: "success", text: "Usunięto pracownika i zaktualizowano grafik." });
     } catch (error) {
       console.error("Nie udało się usunąć pracownika:", error);
       setStatus({ type: "error", text: "Nie udało się usunąć pracownika." });
@@ -302,6 +312,18 @@ export default function AdminDashboardPage() {
     });
   };
 
+  const handleCustomHolidaySave = () => {
+    const parsed = Number.parseInt(holidayInput, 10);
+    if (Number.isNaN(parsed) || parsed < 1 || parsed > days.length) {
+      setStatus({ type: "error", text: "Podaj numer dnia z bieżącego miesiąca." });
+      return;
+    }
+
+    handleToggleHoliday(parsed);
+    setStatus({ type: "success", text: "Zaktualizowano własne święto." });
+    setHolidayInput("");
+  };
+
   const handleSaveSchedule = async () => {
     setStatus({ type: "", text: "" });
 
@@ -334,11 +356,11 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const visibleEmployees = employees;
+  const visibleEmployees = sortedEmployees;
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-8 text-sky-50">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <main className="min-h-screen overflow-x-auto bg-slate-950 px-4 py-8 text-sky-50">
+      <div className="mx-auto flex w-full min-w-[1200px] max-w-7xl flex-col gap-6">
         <header className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-rose-200/30 bg-rose-950/60 p-4 shadow-lg">
           <div>
             <p className="text-xs uppercase tracking-wide text-rose-200">Panel administracji</p>
@@ -452,24 +474,37 @@ export default function AdminDashboardPage() {
 
             <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
               <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Lista pracowników</h3>
-              <div className="mt-3 space-y-3">
-                {employees.map((employee) => (
-                  <div key={employee.id} className="flex items-center justify-between rounded-2xl border border-rose-200/30 bg-rose-950/40 px-4 py-3 text-sm">
-                    <div>
-                      <div className="font-semibold text-rose-50">{employee.firstName} {employee.lastName}</div>
-                      <div className="text-[12px] uppercase tracking-wide text-rose-100/70">{employee.position}</div>
+              <div className="mt-3 space-y-4">
+                {groupedEmployees.map((group, index) => (
+                  <div key={group.position || index} className="space-y-2">
+                    <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-rose-100/70">
+                      <span className="h-px w-10 bg-rose-200/40" />
+                      <span>{group.position || "Inne"}</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteEmployee(employee.id)}
-                      className="rounded-full border border-red-300/60 bg-red-500/20 px-3 py-1 text-[11px] font-semibold text-red-50 transition hover:bg-red-500/40"
-                    >
-                      Usuń
-                    </button>
+                    <div className="space-y-2">
+                      {group.members.map((employee) => (
+                        <div
+                          key={employee.id}
+                          className="flex items-center justify-between rounded-2xl border border-rose-200/30 bg-rose-950/40 px-4 py-3 text-sm"
+                        >
+                          <div>
+                            <div className="font-semibold text-rose-50">{employee.firstName} {employee.lastName}</div>
+                            <div className="text-[12px] uppercase tracking-wide text-rose-100/70">{employee.position}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteEmployee(employee.id)}
+                            className="rounded-full border border-red-300/60 bg-red-500/20 px-3 py-1 text-[11px] font-semibold text-red-50 transition hover:bg-red-500/40"
+                          >
+                            Usuń
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
 
-                {!employees.length && (
+                {!groupedEmployees.length && (
                   <p className="text-sm text-rose-100/80">Brak pracowników do wyświetlenia.</p>
                 )}
               </div>
@@ -597,8 +632,36 @@ export default function AdminDashboardPage() {
               <p className="text-sm font-semibold text-sky-50">{getMonthLabel(currentMonth)}</p>
             </div>
 
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-sky-200/30 bg-slate-950/40 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2 text-[12px] font-semibold text-sky-100">
+                <label className="text-xs uppercase tracking-wide text-sky-200" htmlFor="holiday-input">
+                  Własne święto:
+                </label>
+                <input
+                  id="holiday-input"
+                  type="number"
+                  min={1}
+                  max={days.length}
+                  value={holidayInput}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setHolidayInput(event.target.value)}
+                  className="w-20 rounded-lg border border-sky-200/50 bg-slate-900 px-2 py-1 text-[12px] text-sky-50 focus:border-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-300/60"
+                  placeholder="np. 15"
+                />
+                <button
+                  type="button"
+                  onClick={handleCustomHolidaySave}
+                  className="rounded-full border border-sky-200/40 px-3 py-1 text-[12px] font-semibold text-sky-50 transition hover:bg-sky-400/10"
+                >
+                  Zaznacz / odznacz
+                </button>
+              </div>
+              <p className="text-[11px] text-sky-200/80">
+                Podaj numer dnia miesiąca, aby szybko zaznaczyć go na czerwono lub cofnąć zaznaczenie.
+              </p>
+            </div>
+
             <div className="overflow-auto rounded-2xl border border-sky-200/30">
-              <table className="min-w-full text-[11px] text-sky-50">
+              <table className="min-w-max text-[11px] text-sky-50">
                 <thead className="bg-slate-900/60">
                   <tr>
                     <th className="sticky left-0 z-20 bg-slate-900/60 px-4 py-3 text-left text-xs font-semibold">Pracownik</th>
@@ -628,33 +691,62 @@ export default function AdminDashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleEmployees.map((employee) => (
-                    <tr key={`row-${employee.id}`} className="odd:bg-slate-900/40 even:bg-slate-900/20">
-                      <td className="sticky left-0 z-10 bg-slate-950/80 px-4 py-3 text-left">
-                        <div className="font-semibold">{employee.firstName} {employee.lastName}</div>
-                        <div className="text-[10px] uppercase tracking-wide text-sky-100/70">{employee.position}</div>
-                      </td>
-                      {days.map((day) => {
-                        const entry = scheduleEntries[employee.id];
-                        const value = entry?.shifts?.[day.dayNumber] || "";
-                        const tone = deriveShiftTone(value);
-                        return (
-                          <td
-                            key={`${employee.id}-day-${day.dayNumber}`}
-                            className={`${getDayCellClasses(day, true)} text-center align-middle`}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => handleApplyShift(employee.id, day.dayNumber)}
-                              className={`mx-auto flex h-9 w-14 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold transition hover:scale-105 focus:outline-none focus:ring-2 focus:ring-sky-300/60 ${tone}`}
-                              title="Kliknij, aby ustawić dyżur zgodnie z wybranym trybem"
-                            >
-                              {value || "-"}
-                            </button>
+                  {groupedEmployees.map((group, groupIndex) => (
+                    <Fragment key={`group-${group.position || groupIndex}`}>
+                      {groupIndex > 0 && (
+                        <tr>
+                          <td colSpan={days.length + 1} className="h-3 bg-slate-950" aria-hidden />
+                        </tr>
+                      )}
+
+                      {group.members.map((employee) => (
+                        <tr key={`row-${employee.id}`} className="odd:bg-slate-900/40 even:bg-slate-900/25">
+                          <td className="sticky left-0 z-10 bg-slate-950/80 px-4 py-3 text-left">
+                            <div className="font-semibold">{employee.firstName} {employee.lastName}</div>
+                            <div className="text-[10px] uppercase tracking-wide text-sky-100/70">{employee.position}</div>
                           </td>
-                        );
-                      })}
-                    </tr>
+                          {days.map((day) => {
+                            const entry = scheduleEntries[employee.id];
+                            const value = entry?.shifts?.[day.dayNumber] || "";
+                            const parsedShift = parseShiftValue(value);
+                            const tone = deriveShiftTone(value);
+                            return (
+                              <td
+                                key={`${employee.id}-day-${day.dayNumber}`}
+                                className={`${getDayCellClasses(day, true)} text-center align-middle`}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => handleApplyShift(employee.id, day.dayNumber)}
+                                  className={`mx-auto flex h-10 w-16 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold transition hover:scale-105 focus:outline-none focus:ring-2 focus:ring-sky-300/60 ${tone}`}
+                                  title="Kliknij, aby ustawić dyżur zgodnie z wybranym trybem"
+                                >
+                                  <div className="relative flex h-full w-full items-center justify-center">
+                                    <span className="text-[11px] font-bold">{parsedShift.baseLabel || "-"}</span>
+                                    {parsedShift.wardSide && (
+                                      <span
+                                        className={`absolute right-1 top-1 rounded-md px-1 text-[9px] font-black shadow-sm ${
+                                          parsedShift.wardSide === "o"
+                                            ? "bg-sky-300 text-slate-950"
+                                            : "bg-fuchsia-300 text-slate-950"
+                                        }`}
+                                      >
+                                        {parsedShift.wardSide.toUpperCase()}
+                                      </span>
+                                    )}
+                                    {parsedShift.coordinator && (
+                                      <span className="absolute left-1 top-1 rounded-md bg-red-700 px-1 text-[9px] font-black text-rose-50 shadow-sm">
+                                        K
+                                      </span>
+                                    )}
+                                  </div>
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </Fragment>
                   ))}
 
                   {!visibleEmployees.length && (
