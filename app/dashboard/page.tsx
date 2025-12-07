@@ -1,12 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { collection, doc, getDoc, getDocs, getFirestore, type Firestore } from "firebase/firestore";
 import { auth, app } from "../../lib/firebase";
 import { useAuth } from "../../context/AuthContext";
-import { buildDays, getDayCellClasses, getMonthKey, getMonthLabel, mergeEntriesWithEmployees, type DayCell } from "./utils";
+import {
+  buildDays,
+  getDayCellClasses,
+  getMonthKey,
+  getMonthLabel,
+  groupEmployeesByPosition,
+  mergeEntriesWithEmployees,
+  sortEmployees,
+  type DayCell
+} from "./utils";
 
 type Employee = {
   id: string;
@@ -41,6 +50,18 @@ function deriveShiftTone(value: string): string {
   if (/^\d/.test(value) || value.includes(":")) return "bg-amber-200/90 text-slate-950";
   if (value.startsWith("1")) return "bg-emerald-200/90 text-emerald-950";
   return "bg-slate-200/90 text-slate-900";
+}
+
+function extractShiftBadges(value: string) {
+  const [base, ...rest] = value.split(" ").filter(Boolean);
+  const extras = rest.map((item) => item.trim().toUpperCase());
+
+  return {
+    base: base || "-",
+    hasO: extras.includes("O"),
+    hasR: extras.includes("R"),
+    hasK: extras.includes("K")
+  };
 }
 
 export default function DashboardPage() {
@@ -99,7 +120,9 @@ export default function DashboardPage() {
   }, [user, monthId, db]);
 
   const days: DayCell[] = useMemo(() => buildDays(currentMonth, new Set(customHolidays)), [currentMonth, customHolidays]);
-  const visibleEmployees = employees;
+  const sortedEmployees = useMemo(() => sortEmployees(employees), [employees]);
+  const groupedEmployees = useMemo(() => groupEmployeesByPosition(employees), [employees]);
+  const visibleEmployees = sortedEmployees;
 
   const handleLogout = async () => {
     try {
@@ -119,8 +142,9 @@ export default function DashboardPage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-8 text-sky-50">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <main className="min-h-screen bg-slate-950 px-3 py-6 text-sky-50">
+      <div className="mx-auto w-full max-w-[1600px] overflow-x-auto">
+        <div className="flex w-full min-w-[1200px] flex-col gap-6">
         <header className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-sky-200/20 bg-slate-900/60 p-4 shadow-lg">
           <div>
             <p className="text-xs uppercase tracking-wide text-sky-200">Panel grafiku</p>
@@ -197,8 +221,8 @@ export default function DashboardPage() {
             <p className="text-sm font-semibold text-sky-50">{getMonthLabel(currentMonth)}</p>
           </div>
 
-          <div className="overflow-auto rounded-2xl border border-sky-200/30">
-            <table className="min-w-full text-[11px] text-sky-50">
+          <div className="overflow-x-auto rounded-2xl border border-sky-200/30">
+            <table className="min-w-[1200px] text-[11px] text-sky-50">
               <thead className="bg-slate-900/60">
                 <tr>
                   <th className="sticky left-0 z-10 bg-slate-900/60 px-4 py-3 text-left text-xs font-semibold">Pracownik</th>
@@ -216,28 +240,57 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {visibleEmployees.map((employee) => (
-                  <tr key={`row-${employee.id}`} className="odd:bg-slate-900/40 even:bg-slate-900/20">
-                    <td className="sticky left-0 z-10 bg-slate-950/80 px-4 py-3 text-left">
-                      <div className="font-semibold">{employee.firstName} {employee.lastName}</div>
-                      <div className="text-[10px] uppercase tracking-wide text-sky-100/70">{employee.position}</div>
-                    </td>
-                    {days.map((day) => {
-                      const entry = scheduleEntries[employee.id];
-                      const value = entry?.shifts?.[day.dayNumber] || "";
-                      const tone = deriveShiftTone(value);
-                      return (
-                        <td
-                          key={`${employee.id}-day-${day.dayNumber}`}
-                          className={`${getDayCellClasses(day)} text-center align-middle`}
-                        >
-                          <span className={`mx-auto flex h-8 w-12 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold ${tone}`}>
-                            {value || "-"}
-                          </span>
+                {groupedEmployees.map((group, groupIndex) => (
+                  <Fragment key={`group-${group.position}`}>
+                    {groupIndex > 0 && (
+                      <tr>
+                        <td colSpan={days.length + 1} className="h-2 bg-slate-950/60" />
+                      </tr>
+                    )}
+                    {group.items.map((employee) => (
+                      <tr key={`row-${employee.id}`} className="odd:bg-slate-900/40 even:bg-slate-900/20">
+                        <td className="sticky left-0 z-10 bg-slate-950/80 px-4 py-3 text-left">
+                          <div className="font-semibold">{employee.firstName} {employee.lastName}</div>
+                          <div className="text-[10px] uppercase tracking-wide text-sky-100/70">{employee.position}</div>
                         </td>
-                      );
-                    })}
-                  </tr>
+                        {days.map((day) => {
+                          const entry = scheduleEntries[employee.id];
+                          const value = entry?.shifts?.[day.dayNumber] || "";
+                          const tone = deriveShiftTone(value);
+                          const badges = extractShiftBadges(value);
+                          return (
+                            <td
+                              key={`${employee.id}-day-${day.dayNumber}`}
+                              className={`${getDayCellClasses(day)} text-center align-middle`}
+                            >
+                              <span
+                                className={`relative mx-auto flex h-12 w-16 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold ${tone}`}
+                              >
+                                {badges.hasK && (
+                                  <span className="absolute left-1 top-1 rounded-sm bg-red-700 px-1 text-[10px] font-bold text-red-50 shadow-lg">
+                                    K
+                                  </span>
+                                )}
+                                <span className="absolute right-1 top-1 flex flex-col gap-1">
+                                  {badges.hasO && (
+                                    <span className="rounded-sm bg-emerald-400 px-1 text-[10px] font-bold text-emerald-950 shadow">
+                                      O
+                                    </span>
+                                  )}
+                                  {badges.hasR && (
+                                    <span className="rounded-sm bg-sky-300 px-1 text-[10px] font-bold text-sky-950 shadow">
+                                      R
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="text-sm font-bold tracking-wide">{badges.base}</span>
+                              </span>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </Fragment>
                 ))}
 
                 {!visibleEmployees.length && (
@@ -254,10 +307,11 @@ export default function DashboardPage() {
             </table>
           </div>
 
-          {loadingData && (
-            <p className="mt-4 text-xs text-sky-100/70">Trwa pobieranie danych...</p>
-          )}
-        </section>
+        {loadingData && (
+          <p className="mt-4 text-xs text-sky-100/70">Trwa pobieranie danych...</p>
+        )}
+      </section>
+        </div>
       </div>
     </main>
   );

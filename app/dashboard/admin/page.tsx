@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import {
@@ -17,7 +17,16 @@ import {
 } from "firebase/firestore";
 import { auth, app } from "../../../lib/firebase";
 import { useAuth } from "../../../context/AuthContext";
-import { buildDays, getDayCellClasses, getMonthKey, getMonthLabel, mergeEntriesWithEmployees, type DayCell } from "../utils";
+import {
+  buildDays,
+  getDayCellClasses,
+  getMonthKey,
+  getMonthLabel,
+  groupEmployeesByPosition,
+  mergeEntriesWithEmployees,
+  sortEmployees,
+  type DayCell
+} from "../utils";
 
 type ShiftValue = string;
 
@@ -74,6 +83,18 @@ function deriveShiftTone(value: string): string {
   return "bg-slate-200/90 text-slate-900";
 }
 
+function extractShiftBadges(value: string) {
+  const [base, ...rest] = value.split(" ").filter(Boolean);
+  const extras = rest.map((item) => item.trim().toUpperCase());
+
+  return {
+    base: base || "-",
+    hasO: extras.includes("O"),
+    hasR: extras.includes("R"),
+    hasK: extras.includes("K")
+  };
+}
+
 function normalizeHours(raw: string): string | null {
   const trimmed = raw.trim();
   const match = trimmed.match(/^(\d{1,2}):(\d{2})$/);
@@ -95,6 +116,7 @@ export default function AdminDashboardPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [scheduleEntries, setScheduleEntries] = useState<ScheduleEntries>({});
   const [customHolidays, setCustomHolidays] = useState<number[]>([]);
+  const [customHolidayInput, setCustomHolidayInput] = useState<string>("");
   const [loadingData, setLoadingData] = useState(false);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [scheduleDirty, setScheduleDirty] = useState(false);
@@ -125,6 +147,8 @@ export default function AdminDashboardPage() {
   const monthId = useMemo(() => getMonthKey(currentMonth), [currentMonth]);
   const customHolidaySet = useMemo(() => new Set(customHolidays), [customHolidays]);
   const days: DayCell[] = useMemo(() => buildDays(currentMonth, customHolidaySet), [currentMonth, customHolidaySet]);
+  const groupedEmployees = useMemo(() => groupEmployeesByPosition(employees), [employees]);
+  const sortedEmployees = useMemo(() => sortEmployees(employees), [employees]);
 
   useEffect(() => {
     if (!user || !isAdmin) return;
@@ -236,15 +260,23 @@ export default function AdminDashboardPage() {
     if (!confirmed) return;
 
     try {
+      const updatedEntries = { ...scheduleEntries };
+      delete updatedEntries[employeeId];
+
       await deleteDoc(doc(db, "employees", employeeId));
+      await setDoc(
+        doc(db, "schedules", monthId),
+        {
+          entries: updatedEntries,
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+
       setEmployees((prev) => prev.filter((emp) => emp.id !== employeeId));
-      setScheduleEntries((prev) => {
-        const updated = { ...prev };
-        delete updated[employeeId];
-        setScheduleDirty(true);
-        return updated;
-      });
-      setStatus({ type: "success", text: "Usunięto pracownika." });
+      setScheduleEntries(updatedEntries);
+      setScheduleDirty(true);
+      setStatus({ type: "success", text: "Usunięto pracownika i zaktualizowano grafik." });
     } catch (error) {
       console.error("Nie udało się usunąć pracownika:", error);
       setStatus({ type: "error", text: "Nie udało się usunąć pracownika." });
@@ -302,6 +334,23 @@ export default function AdminDashboardPage() {
     });
   };
 
+  const handleCustomHolidaySubmit = () => {
+    const parsed = Number.parseInt(customHolidayInput, 10);
+
+    if (Number.isNaN(parsed) || parsed < 1 || parsed > days.length) {
+      setStatus({ type: "error", text: `Podaj dzień od 1 do ${days.length}.` });
+      return;
+    }
+
+    const existed = customHolidaySet.has(parsed);
+    handleToggleHoliday(parsed);
+    setCustomHolidayInput("");
+    setStatus({
+      type: "success",
+      text: existed ? "Usunięto dodatkowe święto." : "Dodano dodatkowe święto."
+    });
+  };
+
   const handleSaveSchedule = async () => {
     setStatus({ type: "", text: "" });
 
@@ -334,11 +383,12 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const visibleEmployees = employees;
+  const visibleEmployees = sortedEmployees;
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-8 text-sky-50">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <main className="min-h-screen bg-slate-950 px-3 py-6 text-sky-50">
+      <div className="mx-auto w-full max-w-[1600px] overflow-x-auto">
+        <div className="flex w-full min-w-[1200px] flex-col gap-6">
         <header className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-rose-200/30 bg-rose-950/60 p-4 shadow-lg">
           <div>
             <p className="text-xs uppercase tracking-wide text-rose-200">Panel administracji</p>
@@ -452,20 +502,28 @@ export default function AdminDashboardPage() {
 
             <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
               <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Lista pracowników</h3>
-              <div className="mt-3 space-y-3">
-                {employees.map((employee) => (
-                  <div key={employee.id} className="flex items-center justify-between rounded-2xl border border-rose-200/30 bg-rose-950/40 px-4 py-3 text-sm">
-                    <div>
-                      <div className="font-semibold text-rose-50">{employee.firstName} {employee.lastName}</div>
-                      <div className="text-[12px] uppercase tracking-wide text-rose-100/70">{employee.position}</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteEmployee(employee.id)}
-                      className="rounded-full border border-red-300/60 bg-red-500/20 px-3 py-1 text-[11px] font-semibold text-red-50 transition hover:bg-red-500/40"
-                    >
-                      Usuń
-                    </button>
+              <div className="mt-3 space-y-5">
+                {groupedEmployees.map((group, groupIndex) => (
+                  <div key={group.position} className={groupIndex ? "space-y-3 border-t border-rose-200/20 pt-3" : "space-y-3"}>
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-rose-200">{group.position}</p>
+                    {group.items.map((employee) => (
+                      <div
+                        key={employee.id}
+                        className="flex items-center justify-between rounded-2xl border border-rose-200/30 bg-rose-950/40 px-4 py-3 text-sm"
+                      >
+                        <div>
+                          <div className="font-semibold text-rose-50">{employee.firstName} {employee.lastName}</div>
+                          <div className="text-[12px] uppercase tracking-wide text-rose-100/70">{employee.position}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteEmployee(employee.id)}
+                          className="rounded-full border border-red-300/60 bg-red-500/20 px-3 py-1 text-[11px] font-semibold text-red-50 transition hover:bg-red-500/40"
+                        >
+                          Usuń
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 ))}
 
@@ -573,6 +631,31 @@ export default function AdminDashboardPage() {
               </span>
             </div>
 
+            <div className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-sky-200/30 bg-slate-950/60 px-4 py-3 text-[12px] font-semibold">
+              <div className="flex flex-col gap-1">
+                <span className="text-sky-100">Święta własne:</span>
+                <p className="text-[11px] font-normal text-sky-100/80">Zaznacz dzień na czerwono lub odznacz go z grafiku.</p>
+              </div>
+              <div className="flex items-center gap-2 text-[11px]">
+                <input
+                  type="number"
+                  min={1}
+                  max={days.length}
+                  value={customHolidayInput}
+                  onChange={(e) => setCustomHolidayInput(e.target.value)}
+                  className="w-20 rounded-lg border border-sky-200/40 bg-slate-900 px-2 py-1 text-xs text-sky-50 outline-none focus:border-sky-200 focus:ring-2 focus:ring-sky-300/60"
+                  placeholder="np. 15"
+                />
+                <button
+                  type="button"
+                  onClick={handleCustomHolidaySubmit}
+                  className="rounded-full border border-sky-200/40 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/20"
+                >
+                  Dodaj / usuń
+                </button>
+              </div>
+            </div>
+
             <div id="grafik" className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <button
@@ -597,8 +680,8 @@ export default function AdminDashboardPage() {
               <p className="text-sm font-semibold text-sky-50">{getMonthLabel(currentMonth)}</p>
             </div>
 
-            <div className="overflow-auto rounded-2xl border border-sky-200/30">
-              <table className="min-w-full text-[11px] text-sky-50">
+            <div className="overflow-x-auto rounded-2xl border border-sky-200/30">
+              <table className="min-w-[1200px] text-[11px] text-sky-50">
                 <thead className="bg-slate-900/60">
                   <tr>
                     <th className="sticky left-0 z-20 bg-slate-900/60 px-4 py-3 text-left text-xs font-semibold">Pracownik</th>
@@ -628,33 +711,60 @@ export default function AdminDashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleEmployees.map((employee) => (
-                    <tr key={`row-${employee.id}`} className="odd:bg-slate-900/40 even:bg-slate-900/20">
-                      <td className="sticky left-0 z-10 bg-slate-950/80 px-4 py-3 text-left">
-                        <div className="font-semibold">{employee.firstName} {employee.lastName}</div>
-                        <div className="text-[10px] uppercase tracking-wide text-sky-100/70">{employee.position}</div>
-                      </td>
-                      {days.map((day) => {
-                        const entry = scheduleEntries[employee.id];
-                        const value = entry?.shifts?.[day.dayNumber] || "";
-                        const tone = deriveShiftTone(value);
-                        return (
-                          <td
-                            key={`${employee.id}-day-${day.dayNumber}`}
-                            className={`${getDayCellClasses(day, true)} text-center align-middle`}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => handleApplyShift(employee.id, day.dayNumber)}
-                              className={`mx-auto flex h-9 w-14 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold transition hover:scale-105 focus:outline-none focus:ring-2 focus:ring-sky-300/60 ${tone}`}
-                              title="Kliknij, aby ustawić dyżur zgodnie z wybranym trybem"
-                            >
-                              {value || "-"}
-                            </button>
+                  {groupedEmployees.map((group, groupIndex) => (
+                    <Fragment key={`group-${group.position}`}>
+                      {groupIndex > 0 && (
+                        <tr>
+                          <td colSpan={days.length + 1} className="h-2 bg-slate-950/60" />
+                        </tr>
+                      )}
+                      {group.items.map((employee) => (
+                        <tr key={`row-${employee.id}`} className="odd:bg-slate-900/40 even:bg-slate-900/20">
+                          <td className="sticky left-0 z-10 bg-slate-950/80 px-4 py-3 text-left">
+                            <div className="font-semibold">{employee.firstName} {employee.lastName}</div>
+                            <div className="text-[10px] uppercase tracking-wide text-sky-100/70">{employee.position}</div>
                           </td>
-                        );
-                      })}
-                    </tr>
+                          {days.map((day) => {
+                            const entry = scheduleEntries[employee.id];
+                            const value = entry?.shifts?.[day.dayNumber] || "";
+                            const tone = deriveShiftTone(value);
+                            const badges = extractShiftBadges(value);
+                            return (
+                              <td
+                                key={`${employee.id}-day-${day.dayNumber}`}
+                                className={`${getDayCellClasses(day, true)} text-center align-middle`}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => handleApplyShift(employee.id, day.dayNumber)}
+                                  className={`relative mx-auto flex h-12 w-16 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold transition hover:scale-105 focus:outline-none focus:ring-2 focus:ring-sky-300/60 ${tone}`}
+                                  title="Kliknij, aby ustawić dyżur zgodnie z wybranym trybem"
+                                >
+                                  {badges.hasK && (
+                                    <span className="absolute left-1 top-1 rounded-sm bg-red-700 px-1 text-[10px] font-bold text-red-50 shadow-lg">
+                                      K
+                                    </span>
+                                  )}
+                                  <div className="absolute right-1 top-1 flex flex-col gap-1">
+                                    {badges.hasO && (
+                                      <span className="rounded-sm bg-emerald-400 px-1 text-[10px] font-bold text-emerald-950 shadow">
+                                        O
+                                      </span>
+                                    )}
+                                    {badges.hasR && (
+                                      <span className="rounded-sm bg-sky-300 px-1 text-[10px] font-bold text-sky-950 shadow">
+                                        R
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-sm font-bold tracking-wide">{badges.base}</span>
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </Fragment>
                   ))}
 
                   {!visibleEmployees.length && (
@@ -737,6 +847,7 @@ export default function AdminDashboardPage() {
             {loadingData && <p className="mt-4 text-xs text-sky-100/70">Trwa pobieranie danych...</p>}
           </div>
         </section>
+        </div>
       </div>
     </main>
   );
