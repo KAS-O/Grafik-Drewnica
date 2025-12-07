@@ -38,6 +38,7 @@
 body {
   @apply text-slate-50;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", ui-sans-serif, sans-serif;
+  overflow-x: hidden;
 }
 
 input::placeholder {

@@ -1,6 +1,15 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent
+} from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import {
@@ -128,6 +137,7 @@ export default function AdminDashboardPage() {
   const [loadingData, setLoadingData] = useState(false);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [scheduleDirty, setScheduleDirty] = useState(false);
+  const scheduleDirtyRef = useRef(false);
   const [status, setStatus] = useState<StatusState>({ type: "", text: "" });
   const [employeeForm, setEmployeeForm] = useState<Pick<
     Employee,
@@ -174,11 +184,18 @@ export default function AdminDashboardPage() {
   });
 
   useEffect(() => {
-    if (!user || !isAdmin) return;
+    scheduleDirtyRef.current = scheduleDirty;
+  }, [scheduleDirty]);
 
-    const load = async () => {
+  const loadData = useCallback(
+    async ({ preserveStatus, skipIfDirty }: { preserveStatus?: boolean; skipIfDirty?: boolean } = {}) => {
+      if (!user || !isAdmin) return;
+      if (skipIfDirty && scheduleDirtyRef.current) return;
+
       setLoadingData(true);
-      setStatus({ type: "", text: "" });
+      if (!preserveStatus) {
+        setStatus({ type: "", text: "" });
+      }
 
       try {
         const employeesSnap = await getDocs(collection(db, "employees"));
@@ -210,10 +227,13 @@ export default function AdminDashboardPage() {
       } finally {
         setLoadingData(false);
       }
-    };
+    },
+    [db, isAdmin, monthId, user]
+  );
 
-    void load();
-  }, [user, monthId, db, isAdmin]);
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   const handleLogout = async () => {
     try {
@@ -411,6 +431,7 @@ export default function AdminDashboardPage() {
 
       setStatus({ type: "success", text: "Zaktualizowano dane pracownika." });
       handleCancelEdit();
+      await loadData({ preserveStatus: true, skipIfDirty: true });
     } catch (error) {
       console.error("Nie udało się zaktualizować pracownika:", error);
       setStatus({ type: "error", text: "Nie udało się zaktualizować pracownika." });
@@ -441,6 +462,7 @@ export default function AdminDashboardPage() {
 
       setEmployees((prev) => prev.map((emp) => (selectedEmployeeIds.includes(emp.id) ? { ...emp, employmentRate: rate } : emp)));
       setStatus({ type: "success", text: "Zaktualizowano etaty zaznaczonych pracowników." });
+      await loadData({ preserveStatus: true, skipIfDirty: true });
     } catch (error) {
       console.error("Nie udało się zaktualizować etatów:", error);
       setStatus({ type: "error", text: "Nie udało się zaktualizować etatów." });
@@ -548,7 +570,7 @@ export default function AdminDashboardPage() {
     setScheduleSaving(true);
 
     try {
-      const sanitizedEntries = normalizeScheduleEntries(scheduleEntries);
+      const sanitizedEntries = mergeEntriesWithEmployees(normalizeScheduleEntries(scheduleEntries), employees);
 
       await setDoc(
         doc(db, "schedules", monthId),
@@ -561,8 +583,10 @@ export default function AdminDashboardPage() {
         { merge: true }
       );
 
+      setScheduleEntries(sanitizedEntries);
       setScheduleDirty(false);
       setStatus({ type: "success", text: "Grafik zapisany." });
+      await loadData({ preserveStatus: true });
     } catch (error) {
       console.error("Nie udało się zapisać grafiku:", error);
       setStatus({ type: "error", text: "Nie udało się zapisać grafiku." });
@@ -1032,11 +1056,12 @@ export default function AdminDashboardPage() {
               <p className="text-sm font-semibold text-sky-50">{getMonthLabel(currentMonth)}</p>
             </div>
 
-            <div className="overflow-x-auto rounded-2xl border border-sky-200/30">
-              <table className="min-w-[1200px] text-[11px] text-sky-50">
-                <thead className="bg-slate-900/60">
-                  <tr>
-                    <th className="sticky left-0 z-20 bg-slate-900/60 px-4 py-3 text-left text-xs font-semibold">Pracownik</th>
+            <div className="relative w-full overflow-hidden rounded-2xl border border-sky-200/30">
+              <div className="w-full overflow-x-auto overscroll-x-contain">
+                <table className="min-w-[1200px] text-[11px] text-sky-50">
+                  <thead className="bg-slate-900/60">
+                    <tr>
+                      <th className="sticky left-0 z-20 bg-slate-900/60 px-4 py-3 text-left text-xs font-semibold">Pracownik</th>
                     {days.map((day) => (
                       <th
                         key={`day-header-${day.dayNumber}`}
@@ -1129,8 +1154,9 @@ export default function AdminDashboardPage() {
                       </td>
                     </tr>
                   )}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-sky-100/80">
