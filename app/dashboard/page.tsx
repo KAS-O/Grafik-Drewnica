@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { collection, doc, getDoc, getDocs, type Firestore } from "firebase/firestore";
@@ -17,6 +17,7 @@ import {
   sortEmployees,
   type DayCell
 } from "./utils";
+import { DaySummaryModal, type DayAssignment } from "./DaySummaryModal";
 
 export const dynamic = "force-dynamic";
 
@@ -76,6 +77,7 @@ export default function DashboardPage() {
   const [customHolidays, setCustomHolidays] = useState<number[]>([]);
   const [scheduleEntries, setScheduleEntries] = useState<ScheduleEntries>({});
   const [loadingData, setLoadingData] = useState(false);
+  const [summaryDay, setSummaryDay] = useState<DayCell | null>(null);
   const [status, setStatus] = useState<StatusState>({ type: "", text: "" });
   const db: Firestore = firestore;
 
@@ -131,6 +133,39 @@ export default function DashboardPage() {
   const sortedEmployees = useMemo(() => sortEmployees(employees), [employees]);
   const groupedEmployees = useMemo(() => groupEmployeesByPosition(employees), [employees]);
   const visibleEmployees = sortedEmployees;
+
+  const buildDayAssignments = useCallback(
+    (dayNumber: number): DayAssignment[] => {
+      return visibleEmployees
+        .map((employee) => {
+          const entry = scheduleEntries[employee.id];
+          const value = entry?.shifts?.[dayNumber] || "";
+          if (!value) return null;
+
+          const badges = extractShiftBadges(value);
+          const parts: string[] = [];
+          if (badges.base && badges.base !== "-") parts.push(badges.base);
+          if (badges.hasO) parts.push("O");
+          if (badges.hasR) parts.push("R");
+          if (badges.hasK) parts.push("K");
+
+          const shiftLabel = parts.join(" · ") || badges.base || "-";
+
+          return {
+            id: employee.id,
+            name: `${employee.firstName} ${employee.lastName}`.trim(),
+            position: employee.position,
+            shiftLabel,
+            hasO: badges.hasO,
+            hasR: badges.hasR,
+            hasK: badges.hasK,
+            employmentRate: employee.employmentRate
+          } satisfies DayAssignment;
+        })
+        .filter(Boolean) as DayAssignment[];
+    },
+    [scheduleEntries, visibleEmployees]
+  );
 
   const handleLogout = async () => {
     try {
@@ -239,10 +274,15 @@ export default function DashboardPage() {
                       key={`day-header-${day.dayNumber}`}
                       className={`${getDayCellClasses(day)} text-center text-[10px] font-semibold`}
                     >
-                      <div className="flex flex-col items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setSummaryDay(day)}
+                        className="mx-auto flex flex-col items-center gap-0.5 rounded-lg px-2 py-1 transition hover:bg-sky-200/10 focus:outline-none focus:ring-2 focus:ring-sky-300/60"
+                        title="Podsumowanie dnia"
+                      >
                         <span className="text-xs">{day.dayNumber}</span>
                         <span className="text-[10px] uppercase tracking-wide opacity-80">{day.label.slice(0, 3)}</span>
-                      </div>
+                      </button>
                     </th>
                   ))}
                 </tr>
@@ -343,6 +383,15 @@ export default function DashboardPage() {
       </section>
         </div>
       </div>
+
+      {summaryDay && (
+        <DaySummaryModal
+          dayLabel={`${summaryDay.dayNumber} ${getMonthLabel(currentMonth)} (${summaryDay.label})`}
+          dayNumber={summaryDay.dayNumber}
+          assignments={buildDayAssignments(summaryDay.dayNumber)}
+          onClose={() => setSummaryDay(null)}
+        />
+      )}
     </main>
   );
 }

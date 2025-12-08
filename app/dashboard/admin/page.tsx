@@ -38,6 +38,7 @@ import {
   type DayCell,
   type SimpleEmployee
 } from "../utils";
+import { DaySummaryModal, type DayAssignment } from "../DaySummaryModal";
 
 export const dynamic = "force-dynamic";
 
@@ -147,6 +148,7 @@ export default function AdminDashboardPage() {
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [scheduleDirty, setScheduleDirty] = useState(false);
   const scheduleDirtyRef = useRef(false);
+  const [summaryDay, setSummaryDay] = useState<DayCell | null>(null);
   const [status, setStatus] = useState<StatusState>({ type: "", text: "" });
   const [activeSection, setActiveSection] = useState<AdminSection>("schedule");
   const [employeeForm, setEmployeeForm] = useState<Pick<
@@ -160,7 +162,6 @@ export default function AdminDashboardPage() {
   });
   const [formPending, setFormPending] = useState(false);
   const [activeAction, setActiveAction] = useState<ShiftAction>("D");
-  const [primaryShift, setPrimaryShift] = useState<ShiftTemplate>("D");
   const [hoursValue, setHoursValue] = useState("6:10");
   const db: Firestore = firestore;
 
@@ -503,51 +504,74 @@ export default function AdminDashboardPage() {
 
   const handleSelectAction = (action: ShiftAction) => {
     setActiveAction(action);
-    if (action === "D" || action === "N" || action === "1" || action === "hours") {
-      setPrimaryShift(action);
-    }
   };
 
-  const buildShiftValue = (): string | null => {
-    if (activeAction === "clear") return "";
+  const parseShiftValue = (value: string) => {
+    const [base = "", ...rest] = value.split(" ").filter(Boolean);
+    const extras = new Set(rest.map((item) => item.trim().toUpperCase()));
 
-    const extras: string[] = [];
-    if (activeAction === "o" || activeAction === "r") {
-      extras.push(activeAction);
-    }
-    if (activeAction === "k") {
-      extras.push("K");
-    }
+    return { base, extras };
+  };
 
-    const base: ShiftTemplate =
-      activeAction === "D" || activeAction === "N" || activeAction === "1" || activeAction === "hours"
-        ? activeAction
-        : primaryShift;
-
-    if (base === "hours") {
-      const normalized = normalizeHours(hoursValue);
-      if (!normalized) {
-        setStatus({ type: "error", text: "Podaj poprawny czas w formacie GG:MM (np. 6:10)." });
-        return null;
-      }
-      return `${normalized}${extras.length ? ` ${extras.join(" ")}` : ""}`.trim();
-    }
-
-    return `${base}${extras.length ? ` ${extras.join(" ")}` : ""}`.trim();
+  const formatShiftValue = (base: string, extras: Set<string>) => {
+    const orderedExtras = ["O", "R", "K"].filter((mark) => extras.has(mark));
+    return [base, ...orderedExtras].filter(Boolean).join(" ").trim();
   };
 
   const handleApplyShift = (employeeId: string, dayNumber: number) => {
     if (!isAdmin) return;
 
-    const value = buildShiftValue();
-    if (value === null) return;
+    const currentValue = scheduleEntries[employeeId]?.shifts?.[dayNumber] || "";
+    const { base, extras } = parseShiftValue(currentValue);
+    const nextExtras = new Set(extras);
+    let nextBase = base;
+
+    if (activeAction === "clear") {
+      nextBase = "";
+      nextExtras.clear();
+    }
+
+    if (activeAction === "D" || activeAction === "N" || activeAction === "1") {
+      nextBase = activeAction;
+      nextExtras.clear();
+    }
+
+    if (activeAction === "hours") {
+      const normalized = normalizeHours(hoursValue);
+      if (!normalized) {
+        setStatus({ type: "error", text: "Podaj poprawny czas w formacie GG:MM (np. 6:10)." });
+        return;
+      }
+      nextBase = normalized;
+      nextExtras.clear();
+    }
+
+    if (activeAction === "o") {
+      nextExtras.delete("R");
+      nextExtras.add("O");
+    }
+
+    if (activeAction === "r") {
+      nextExtras.delete("O");
+      nextExtras.add("R");
+    }
+
+    if (activeAction === "k") {
+      if (nextExtras.has("K")) {
+        nextExtras.delete("K");
+      } else {
+        nextExtras.add("K");
+      }
+    }
+
+    const nextValue = formatShiftValue(nextBase, nextExtras);
 
     setScheduleEntries((prev) => {
       const current = prev[employeeId] || { shifts: {} };
       const updatedShifts = { ...current.shifts };
 
-      if (value) {
-        updatedShifts[dayNumber] = value;
+      if (nextValue) {
+        updatedShifts[dayNumber] = nextValue;
       } else {
         delete updatedShifts[dayNumber];
       }
@@ -630,6 +654,39 @@ export default function AdminDashboardPage() {
   };
 
   const visibleEmployees = sortedEmployees;
+
+  const buildDayAssignments = useCallback(
+    (dayNumber: number): DayAssignment[] => {
+      return visibleEmployees
+        .map((employee) => {
+          const entry = scheduleEntries[employee.id];
+          const value = entry?.shifts?.[dayNumber] || "";
+          if (!value) return null;
+
+          const badges = extractShiftBadges(value);
+          const parts: string[] = [];
+          if (badges.base && badges.base !== "-") parts.push(badges.base);
+          if (badges.hasO) parts.push("O");
+          if (badges.hasR) parts.push("R");
+          if (badges.hasK) parts.push("K");
+
+          const shiftLabel = parts.join(" · ") || badges.base || "-";
+
+          return {
+            id: employee.id,
+            name: `${employee.firstName} ${employee.lastName}`.trim(),
+            position: employee.position,
+            shiftLabel,
+            hasO: badges.hasO,
+            hasR: badges.hasR,
+            hasK: badges.hasK,
+            employmentRate: employee.employmentRate
+          } satisfies DayAssignment;
+        })
+        .filter(Boolean) as DayAssignment[];
+    },
+    [scheduleEntries, visibleEmployees]
+  );
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-slate-950 px-3 py-6 text-sky-50">
@@ -1134,10 +1191,15 @@ export default function AdminDashboardPage() {
                           key={`day-header-${day.dayNumber}`}
                           className={`${getDayCellClasses(day, true)} relative text-center text-[10px] font-semibold`}
                         >
-                          <div className="flex flex-col items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setSummaryDay(day)}
+                            className="mx-auto flex flex-col items-center gap-0.5 rounded-lg px-2 py-1 transition hover:bg-sky-200/10 focus:outline-none focus:ring-2 focus:ring-sky-300/60"
+                            title="Podsumowanie dnia"
+                          >
                             <span className="text-xs">{day.dayNumber}</span>
                             <span className="text-[10px] uppercase tracking-wide opacity-80">{day.label.slice(0, 3)}</span>
-                          </div>
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleToggleHoliday(day.dayNumber)}
@@ -1256,6 +1318,15 @@ export default function AdminDashboardPage() {
         )}
       </div>
       </div>
+
+      {summaryDay && (
+        <DaySummaryModal
+          dayLabel={`${summaryDay.dayNumber} ${getMonthLabel(currentMonth)} (${summaryDay.label})`}
+          dayNumber={summaryDay.dayNumber}
+          assignments={buildDayAssignments(summaryDay.dayNumber)}
+          onClose={() => setSummaryDay(null)}
+        />
+      )}
     </main>
   );
 }

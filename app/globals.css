@@ -41,6 +41,33 @@ body {
   overflow-x: hidden;
 }
 
+/* Upiększone paski przewijania */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #38bdf8 #0f172a;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: radial-gradient(circle at 30% 30%, rgba(56, 189, 248, 0.15), transparent 35%), #0f172a;
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #38bdf8, #7dd3fc);
+  border-radius: 9999px;
+  border: 2px solid #0f172a;
+  box-shadow: 0 0 10px rgba(125, 211, 252, 0.5);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #7dd3fc, #38bdf8);
+}
+
 input::placeholder {
   @apply text-slate-400;
 }
