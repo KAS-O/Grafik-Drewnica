@@ -51,6 +51,8 @@ type Position =
 
 type EmploymentRate = "1 etat 12h" | "1 etat 8h" | "1/2 etatu" | "3/4 etatu";
 
+type AdminSection = "schedule" | "employees" | "generator";
+
 type Employee = {
   id: string;
   firstName: string;
@@ -86,6 +88,12 @@ const POSITIONS = [
 ];
 
 const EMPLOYMENT_RATES: EmploymentRate[] = ["1 etat 12h", "1 etat 8h", "1/2 etatu", "3/4 etatu"];
+
+const ADMIN_SECTIONS: { key: AdminSection; label: string }[] = [
+  { key: "schedule", label: "Edycja grafiku" },
+  { key: "employees", label: "Zarządzanie pracownikami" },
+  { key: "generator", label: "Generator grafików" }
+];
 
 type ShiftTemplate = "D" | "N" | "1" | "hours" | "clear";
 
@@ -139,6 +147,7 @@ export default function AdminDashboardPage() {
   const [scheduleDirty, setScheduleDirty] = useState(false);
   const scheduleDirtyRef = useRef(false);
   const [status, setStatus] = useState<StatusState>({ type: "", text: "" });
+  const [activeSection, setActiveSection] = useState<AdminSection>("schedule");
   const [employeeForm, setEmployeeForm] = useState<Pick<
     Employee,
     "firstName" | "lastName" | "position" | "employmentRate"
@@ -604,9 +613,11 @@ export default function AdminDashboardPage() {
         { merge: true }
       );
 
-      setScheduleEntries(sanitizedEntries);
+      const syncedEntries = mergeEntriesWithEmployees(sanitizedEntries, employees);
+      setScheduleEntries(syncedEntries);
       setCustomHolidays(uniqueHolidays);
       setScheduleDirty(false);
+      scheduleDirtyRef.current = false;
       setStatus({ type: "success", text: "Grafik zapisany." });
       await loadData({ preserveStatus: true, skipIfDirty: true });
     } catch (error) {
@@ -645,6 +656,34 @@ export default function AdminDashboardPage() {
           </div>
         </header>
 
+        <div className="rounded-2xl border border-sky-200/30 bg-slate-900/60 p-4 shadow-inner">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.2em] text-sky-200">Sekcje panelu</p>
+              <p className="text-xs text-sky-100/80">Wybierz obszar administracji.</p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs font-semibold">
+              {ADMIN_SECTIONS.map((section) => {
+                const isActive = activeSection === section.key;
+
+                return (
+                  <button
+                    key={section.key}
+                    onClick={() => setActiveSection(section.key)}
+                    className={`rounded-full px-4 py-1 transition ${
+                      isActive
+                        ? "border border-sky-300/60 bg-sky-400/20 text-sky-50 shadow"
+                        : "border border-sky-200/40 bg-slate-950/60 text-sky-100 hover:border-sky-300/60 hover:text-sky-50"
+                    }`}
+                  >
+                    {section.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
         {status.text && (
           <div
             className={`rounded-2xl border px-4 py-3 text-sm ${
@@ -659,601 +698,561 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
-        <section className="rounded-3xl border border-rose-400/30 bg-gradient-to-r from-rose-950 via-rose-900/60 to-slate-950 p-5 text-rose-50 shadow-xl">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-2">
-              <div className="inline-flex items-center gap-2 rounded-full border border-rose-300/40 bg-rose-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-rose-100">
-                <span className="h-2 w-2 rounded-full bg-rose-400 shadow-neon" />
-                Panel Administracji
-              </div>
-              <div className="space-y-1">
-                <h2 className="text-lg font-semibold text-rose-50">Dodawanie i usuwanie pracowników</h2>
-                <p className="max-w-3xl text-sm text-rose-100/80">
-                  Dodawaj i usuwaj osoby z listy pracowników. Zmiany od razu dostępne w grafiku.
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-              <span className="rounded-full border border-emerald-400/50 bg-emerald-500/10 px-3 py-1 text-emerald-100">
-                {isAdmin ? "Administrator" : "Podgląd"}
-              </span>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-            <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Dodawanie pracowników</h3>
-              {isAdmin ? (
-                <form onSubmit={handleAddEmployee} className="mt-3 space-y-4">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-rose-100">Imię</label>
-                      <input
-                        type="text"
-                        value={employeeForm.firstName}
-                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, firstName: e.target.value }))}
-                        className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-rose-100">Nazwisko</label>
-                      <input
-                        type="text"
-                        value={employeeForm.lastName}
-                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, lastName: e.target.value }))}
-                        className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
-                      />
-                    </div>
+        {activeSection === "employees" && (
+          <>
+            <section className="rounded-3xl border border-rose-400/30 bg-gradient-to-r from-rose-950 via-rose-900/60 to-slate-950 p-5 text-rose-50 shadow-xl">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-rose-300/40 bg-rose-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-rose-100">
+                    <span className="h-2 w-2 rounded-full bg-rose-400 shadow-neon" />
+                    Panel Administracji
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs uppercase tracking-wide text-rose-100">Stanowisko</label>
-                    <select
-                      value={employeeForm.position}
-                      onChange={(e) => setEmployeeForm((prev) => ({ ...prev, position: e.target.value as Position }))}
-                      className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
-                    >
-                      {POSITIONS.map((pos) => (
-                        <option key={pos} value={pos} className="bg-slate-900">
-                          {pos}
-                        </option>
-                      ))}
-                    </select>
+                    <h2 className="text-lg font-semibold text-rose-50">Dodawanie i usuwanie pracowników</h2>
+                    <p className="max-w-3xl text-sm text-rose-100/80">
+                      Dodawaj i usuwaj osoby z listy pracowników. Zmiany od razu dostępne w grafiku.
+                    </p>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-xs uppercase tracking-wide text-rose-100">Etat</label>
-                    <select
-                      value={employeeForm.employmentRate}
-                      onChange={(e) =>
-                        setEmployeeForm((prev) => ({ ...prev, employmentRate: e.target.value as EmploymentRate }))
-                      }
-                      className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
-                    >
-                      {EMPLOYMENT_RATES.map((rate) => (
-                        <option key={rate} value={rate} className="bg-slate-900">
-                          {rate}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={formPending}
-                    className="w-full rounded-2xl bg-gradient-to-r from-rose-400 via-rose-500 to-rose-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {formPending ? "Dodawanie..." : "Dodaj pracownika"}
-                  </button>
-                </form>
-              ) : (
-                <p className="mt-2 text-sm text-rose-100/80">
-                  Panel administracyjny jest dostępny tylko dla administratorów. Poproś o dostęp, aby dodawać pracowników i edytować grafik.
-                </p>
-              )}
-            </div>
-
-            <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Lista pracowników</h3>
-                <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-rose-200">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={!!employees.length && selectedEmployeeIds.length === employees.length}
-                      onChange={(e) => handleSelectAll(e.target.checked)}
-                      className="h-4 w-4 rounded border-rose-200 bg-rose-950/40 text-rose-400 focus:ring-rose-300"
-                    />
-                    <span>Wybierz wszystkich</span>
-                  </label>
-                  <span className="rounded-full border border-rose-200/40 bg-rose-900/60 px-2 py-0.5 text-[10px]">
-                    Wybrano {selectedEmployeeIds.length}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                  <span className="rounded-full border border-emerald-400/50 bg-emerald-500/10 px-3 py-1 text-emerald-100">
+                    {isAdmin ? "Administrator" : "Podgląd"}
                   </span>
                 </div>
               </div>
 
-              <div className="mt-2 flex flex-wrap gap-2 text-[12px]">
-                {EMPLOYMENT_RATES.map((rate) => (
-                  <button
-                    key={rate}
-                    type="button"
-                    onClick={() => handleApplyEmploymentRate(rate)}
-                    disabled={formPending}
-                    className="rounded-full border border-rose-200/40 bg-rose-800/60 px-3 py-1 font-semibold text-rose-50 transition hover:brightness-110 disabled:opacity-60"
-                  >
-                    Ustaw {rate}
-                  </button>
-                ))}
-              </div>
-
-              <div className="mt-3 max-h-[28rem] space-y-4 overflow-y-auto pr-1">
-                {groupedEmployees.map((group, groupIndex) => {
-                  const theme = getPositionTheme(group.position);
-
-                  return (
-                    <div
-                      key={group.position}
-                      className={`space-y-3 rounded-2xl border p-3 ${
-                        groupIndex ? "border-rose-200/10" : ""
-                      } ${theme.containerBg} ${theme.containerBorder}`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`h-2 w-2 rounded-full ${theme.accentDot}`} />
-                        <p className={`text-[11px] uppercase tracking-[0.2em] ${theme.labelText}`}>{group.position}</p>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${theme.labelPill}`}>
-                          {group.items.length} os.
-                        </span>
+              <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Dodawanie pracowników</h3>
+                  {isAdmin ? (
+                    <form onSubmit={handleAddEmployee} className="mt-3 space-y-4">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-1">
+                          <label className="text-xs uppercase tracking-wide text-rose-100">Imię</label>
+                          <input
+                            type="text"
+                            value={employeeForm.firstName}
+                            onChange={(e) => setEmployeeForm((prev) => ({ ...prev, firstName: e.target.value }))}
+                            className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs uppercase tracking-wide text-rose-100">Nazwisko</label>
+                          <input
+                            type="text"
+                            value={employeeForm.lastName}
+                            onChange={(e) => setEmployeeForm((prev) => ({ ...prev, lastName: e.target.value }))}
+                            className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                          />
+                        </div>
                       </div>
-                      <div className="space-y-2">
-                        {group.items.map((employee) => (
-                          <div
-                            key={employee.id}
-                            className={`flex w-full flex-wrap items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm shadow-inner transition ${theme.rowBg} ${theme.rowBorder}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedEmployeeIds.includes(employee.id)}
-                              onChange={(e) => handleSelectEmployee(employee.id, e.target.checked)}
-                              className="h-4 w-4 rounded border-rose-200 bg-rose-950/50 text-rose-300 focus:ring-rose-300"
-                            />
-                            <div className="min-w-[12rem] flex-1">
-                              <div className="font-semibold text-rose-50">{employee.firstName} {employee.lastName}</div>
-                              <div className="text-[12px] uppercase tracking-wide text-rose-100/70">{employee.position}</div>
-                              <div className="text-[11px] text-rose-100/70">{employee.employmentRate || "brak danych"}</div>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => handleStartEdit(employee)}
-                                className="rounded-full border border-rose-200/50 bg-rose-50/10 px-3 py-1 text-[11px] font-semibold text-rose-50 transition hover:brightness-110"
-                              >
-                                Edytuj
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteEmployee(employee.id)}
-                                disabled={deletingEmployeeId === employee.id}
-                                className="rounded-full border border-red-300/60 bg-red-500/20 px-3 py-1 text-[11px] font-semibold text-red-50 transition hover:bg-red-500/30 disabled:opacity-70"
-                              >
-                                {deletingEmployeeId === employee.id ? "Usuwanie..." : "Usuń"}
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                      <div className="space-y-1">
+                        <label className="text-xs uppercase tracking-wide text-rose-100">Stanowisko</label>
+                        <select
+                          value={employeeForm.position}
+                          onChange={(e) => setEmployeeForm((prev) => ({ ...prev, position: e.target.value as Position }))}
+                          className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                        >
+                          {POSITIONS.map((pos) => (
+                            <option key={pos} value={pos} className="bg-slate-900">
+                              {pos}
+                            </option>
+                          ))}
+                        </select>
                       </div>
+                      <div className="space-y-1">
+                        <label className="text-xs uppercase tracking-wide text-rose-100">Etat</label>
+                        <select
+                          value={employeeForm.employmentRate}
+                          onChange={(e) =>
+                            setEmployeeForm((prev) => ({ ...prev, employmentRate: e.target.value as EmploymentRate }))
+                          }
+                          className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                        >
+                          {EMPLOYMENT_RATES.map((rate) => (
+                            <option key={rate} value={rate} className="bg-slate-900">
+                              {rate}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={formPending}
+                        className="w-full rounded-2xl bg-gradient-to-r from-rose-400 via-rose-500 to-rose-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {formPending ? "Dodawanie..." : "Dodaj pracownika"}
+                      </button>
+                    </form>
+                  ) : (
+                    <p className="mt-2 text-sm text-rose-100/80">
+                      Panel administracyjny jest dostępny tylko dla administratorów. Poproś o dostęp, aby dodawać pracowników i edytować grafik.
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Lista pracowników</h3>
+                    <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-rose-200">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={!!employees.length && selectedEmployeeIds.length === employees.length}
+                          onChange={(e) => handleSelectAll(e.target.checked)}
+                          className="h-4 w-4 rounded border-rose-200 bg-rose-950/40 text-rose-400 focus:ring-rose-300"
+                        />
+                        <span>Wybierz wszystkich</span>
+                      </label>
+                      <span className="rounded-full border border-rose-200/40 bg-rose-900/60 px-2 py-0.5 text-[10px]">
+                        Wybrano {selectedEmployeeIds.length}
+                      </span>
                     </div>
-                  );
-                })}
+                  </div>
 
-                {!employees.length && (
-                  <p className="text-sm text-rose-100/80">Brak pracowników do wyświetlenia.</p>
-                )}
+                  <div className="mt-2 flex flex-wrap gap-2 text-[12px]">
+                    {EMPLOYMENT_RATES.map((rate) => (
+                      <button
+                        key={rate}
+                        type="button"
+                        onClick={() => handleApplyEmploymentRate(rate)}
+                        disabled={formPending}
+                        className="rounded-full border border-rose-200/40 bg-rose-800/60 px-3 py-1 font-semibold text-rose-50 transition hover:brightness-110 disabled:opacity-60"
+                      >
+                        Ustaw {rate}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mt-3 max-h-[28rem] space-y-4 overflow-y-auto pr-1">
+                    {groupedEmployees.map((group, groupIndex) => {
+                      const theme = getPositionTheme(group.position);
+
+                      return (
+                        <div
+                          key={group.position}
+                          className={`space-y-3 rounded-2xl border p-3 ${
+                            groupIndex ? "border-rose-200/10" : ""
+                          } ${theme.containerBg} ${theme.containerBorder}`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${theme.accentDot}`} />
+                            <p className={`text-[11px] uppercase tracking-[0.2em] ${theme.labelText}`}>{group.position}</p>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${theme.labelPill}`}>
+                              {group.items.length} os.
+                            </span>
+                          </div>
+                          <div className="space-y-2">
+                            {group.items.map((employee) => (
+                              <div
+                                key={employee.id}
+                                className={`flex w-full flex-wrap items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm shadow-inner transition ${theme.rowBg} ${theme.rowBorder}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedEmployeeIds.includes(employee.id)}
+                                  onChange={(e) => handleSelectEmployee(employee.id, e.target.checked)}
+                                  className="h-4 w-4 rounded border-rose-200 bg-rose-950/50 text-rose-300 focus:ring-rose-300"
+                                />
+                                <div className="min-w-[12rem] flex-1">
+                                  <div className="font-semibold text-rose-50">{employee.firstName} {employee.lastName}</div>
+                                  <div className="text-[12px] uppercase tracking-wide text-rose-100/70">{employee.position}</div>
+                                  <div className="text-[11px] text-rose-100/70">{employee.employmentRate || "brak danych"}</div>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEdit(employee)}
+                                    className="rounded-full border border-rose-200/50 bg-rose-50/10 px-3 py-1 text-[11px] font-semibold text-rose-50 transition hover:brightness-110"
+                                  >
+                                    Edytuj
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteEmployee(employee.id)}
+                                    disabled={deletingEmployeeId === employee.id}
+                                    className="rounded-full border border-red-300/60 bg-red-500/20 px-3 py-1 text-[11px] font-semibold text-red-50 transition hover:bg-red-500/30 disabled:opacity-70"
+                                  >
+                                    {deletingEmployeeId === employee.id ? "Usuwanie..." : "Usuń"}
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {!employees.length && (
+                      <p className="text-sm text-rose-100/80">Brak pracowników do wyświetlenia.</p>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        </section>
+            </section>
 
-        <section className="rounded-3xl border border-rose-300/30 bg-rose-900/30 p-5 shadow-inner">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Edycja pracownika</h3>
-              <p className="text-xs text-rose-100/80">Wybierz osobę z listy i zaktualizuj jej dane.</p>
-            </div>
-            <span className="rounded-full border border-rose-200/50 bg-rose-800/50 px-3 py-1 text-[11px] font-semibold text-rose-100">
-              {editingEmployeeId ? "Tryb edycji" : "Brak wybranej osoby"}
-            </span>
-          </div>
-
-          <form onSubmit={handleUpdateEmployee} className="mt-4 grid gap-3 md:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wide text-rose-100">Imię</label>
-              <input
-                type="text"
-                value={editForm.firstName}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, firstName: e.target.value }))}
-                disabled={!editingEmployeeId}
-                className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wide text-rose-100">Nazwisko</label>
-              <input
-                type="text"
-                value={editForm.lastName}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, lastName: e.target.value }))}
-                disabled={!editingEmployeeId}
-                className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wide text-rose-100">Stanowisko</label>
-              <select
-                value={editForm.position}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, position: e.target.value as Position }))}
-                disabled={!editingEmployeeId}
-                className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {POSITIONS.map((pos) => (
-                  <option key={pos} value={pos} className="bg-slate-900">
-                    {pos}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wide text-rose-100">Etat</label>
-              <select
-                value={editForm.employmentRate}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, employmentRate: e.target.value as EmploymentRate }))}
-                disabled={!editingEmployeeId}
-                className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {EMPLOYMENT_RATES.map((rate) => (
-                  <option key={rate} value={rate} className="bg-slate-900">
-                    {rate}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 md:col-span-2">
-              <button
-                type="submit"
-                disabled={!editingEmployeeId || formPending}
-                className="rounded-full bg-gradient-to-r from-rose-400 via-rose-500 to-rose-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {formPending ? "Zapisywanie..." : "Zapisz zmiany"}
-              </button>
-              <button
-                type="button"
-                onClick={handleCancelEdit}
-                className="rounded-full border border-rose-200/50 bg-rose-50/5 px-4 py-2 text-sm font-semibold text-rose-50 transition hover:brightness-110"
-              >
-                Anuluj
-              </button>
-              <p className="text-xs text-rose-100/70">Edycja zapisuje dane bezpośrednio w bazie i aktualizuje grafik.</p>
-            </div>
-          </form>
-        </section>
-
-        <section className="grid min-w-0 gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="glass-panel min-w-0 rounded-3xl border border-sky-200/20 bg-slate-900/60 p-5 md:p-6">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-col gap-1">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Edycja grafiku</h2>
-                <p className="text-xs text-sky-100/80">
-                  Wybierz tryb wstawiania (D/N/1 lub godziny), dodaj opcje O/R, K i kliknij w pole grafiku, aby ustawić dyżur.
-                </p>
+            <section className="rounded-3xl border border-rose-300/30 bg-rose-900/30 p-5 shadow-inner">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Edycja pracownika</h3>
+                  <p className="text-xs text-rose-100/80">Wybierz osobę z listy i zaktualizuj jej dane.</p>
+                </div>
+                <span className="rounded-full border border-rose-200/50 bg-rose-800/50 px-3 py-1 text-[11px] font-semibold text-rose-100">
+                  {editingEmployeeId ? "Tryb edycji" : "Brak wybranej osoby"}
+                </span>
               </div>
-              <div className="flex items-center gap-2 text-[11px] font-medium text-sky-100">
-                <span className="rounded-full bg-sky-400/10 px-3 py-1">{days.length} dni</span>
-                <span className="rounded-full bg-sky-400/10 px-3 py-1">{visibleEmployees.length} prac.</span>
-              </div>
-            </div>
 
-            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-sky-200/30 bg-slate-950/60 px-4 py-3 text-[12px] font-semibold">
-              <span className="text-sky-100">Tryb wstawiania:</span>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleSelectAction("D")}
-                  className={`rounded-full px-3 py-1 ${activeAction === "D" ? "bg-amber-400 text-slate-900 shadow" : "border border-sky-200/40 text-sky-100"}`}
-                >
-                  D (Dzień)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSelectAction("N")}
-                  className={`rounded-full px-3 py-1 ${activeAction === "N" ? "bg-sky-300 text-slate-900 shadow" : "border border-sky-200/40 text-sky-100"}`}
-                >
-                  N (Noc)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSelectAction("1")}
-                  className={`rounded-full px-3 py-1 ${activeAction === "1" ? "bg-emerald-300 text-emerald-950 shadow" : "border border-sky-200/40 text-sky-100"}`}
-                >
-                  1 (8h / Pn-Pt)
-                </button>
-                <div className="flex items-center gap-2 rounded-full border border-sky-200/40 px-3 py-1">
-                  <label className="text-sky-100">Godziny</label>
+              <form onSubmit={handleUpdateEmployee} className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <label className="text-xs uppercase tracking-wide text-rose-100">Imię</label>
                   <input
-                    value={hoursValue}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) => setHoursValue(e.target.value)}
-                    onFocus={() => handleSelectAction("hours")}
+                    type="text"
+                    value={editForm.firstName}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, firstName: e.target.value }))}
+                    disabled={!editingEmployeeId}
+                    className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs uppercase tracking-wide text-rose-100">Nazwisko</label>
+                  <input
+                    type="text"
+                    value={editForm.lastName}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, lastName: e.target.value }))}
+                    disabled={!editingEmployeeId}
+                    className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs uppercase tracking-wide text-rose-100">Stanowisko</label>
+                  <select
+                    value={editForm.position}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, position: e.target.value as Position }))}
+                    disabled={!editingEmployeeId}
+                    className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {POSITIONS.map((pos) => (
+                      <option key={pos} value={pos} className="bg-slate-900">
+                        {pos}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs uppercase tracking-wide text-rose-100">Etat</label>
+                  <select
+                    value={editForm.employmentRate}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, employmentRate: e.target.value as EmploymentRate }))}
+                    disabled={!editingEmployeeId}
+                    className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {EMPLOYMENT_RATES.map((rate) => (
+                      <option key={rate} value={rate} className="bg-slate-900">
+                        {rate}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 md:col-span-2">
+                  <button
+                    type="submit"
+                    disabled={!editingEmployeeId || formPending}
+                    className="rounded-full bg-gradient-to-r from-rose-400 via-rose-500 to-rose-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {formPending ? "Zapisywanie..." : "Zapisz zmiany"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    className="rounded-full border border-rose-200/50 bg-rose-50/5 px-4 py-2 text-sm font-semibold text-rose-50 transition hover:brightness-110"
+                  >
+                    Anuluj
+                  </button>
+                  <p className="text-xs text-rose-100/70">Edycja zapisuje dane bezpośrednio w bazie i aktualizuje grafik.</p>
+                </div>
+              </form>
+            </section>
+          </>
+        )}
+
+        {activeSection === "schedule" && (
+          <section className="min-w-0">
+            <div className="glass-panel min-w-0 rounded-3xl border border-sky-200/20 bg-slate-900/60 p-5 md:p-6">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-col gap-1">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Edycja grafiku</h2>
+                  <p className="text-xs text-sky-100/80">
+                    Wybierz tryb wstawiania (D/N/1 lub godziny), dodaj opcje O/R, K i kliknij w pole grafiku, aby ustawić dyżur.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 text-[11px] font-medium text-sky-100">
+                  <span className="rounded-full bg-sky-400/10 px-3 py-1">{days.length} dni</span>
+                  <span className="rounded-full bg-sky-400/10 px-3 py-1">{visibleEmployees.length} prac.</span>
+                </div>
+              </div>
+
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-sky-200/30 bg-slate-950/60 px-4 py-3 text-[12px] font-semibold">
+                <span className="text-sky-100">Tryb wstawiania:</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAction("D")}
+                    className={`rounded-full px-3 py-1 ${activeAction === "D" ? "bg-amber-400 text-slate-900 shadow" : "border border-sky-200/40 text-sky-100"}`}
+                  >
+                    D (Dzień)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAction("N")}
+                    className={`rounded-full px-3 py-1 ${activeAction === "N" ? "bg-sky-300 text-slate-900 shadow" : "border border-sky-200/40 text-sky-100"}`}
+                  >
+                    N (Noc)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAction("1")}
+                    className={`rounded-full px-3 py-1 ${activeAction === "1" ? "bg-emerald-300 text-emerald-950 shadow" : "border border-sky-200/40 text-sky-100"}`}
+                  >
+                    1 (8h / Pn-Pt)
+                  </button>
+                  <div className="flex items-center gap-2 rounded-full border border-sky-200/40 px-3 py-1">
+                    <label className="text-sky-100">Godziny</label>
+                    <input
+                      value={hoursValue}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => setHoursValue(e.target.value)}
+                      onFocus={() => handleSelectAction("hours")}
+                      className="w-20 rounded-lg border border-sky-200/40 bg-slate-900 px-2 py-1 text-xs text-sky-50 outline-none focus:border-sky-200 focus:ring-2 focus:ring-sky-300/60"
+                      placeholder="6:10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSelectAction("hours")}
+                      className={`rounded-full px-2 py-1 text-[11px] ${activeAction === "hours" ? "bg-sky-200 text-slate-900" : "bg-slate-800 text-sky-100"}`}
+                    >
+                      Ustaw
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAction("clear")}
+                    className={`rounded-full px-3 py-1 ${activeAction === "clear" ? "bg-slate-200 text-slate-900 shadow" : "border border-sky-200/40 text-sky-100"}`}
+                  >
+                    Wyczyść pole
+                  </button>
+                </div>
+              </div>
+
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-sky-200/30 bg-slate-950/60 px-4 py-3 text-[12px] font-semibold">
+                <span className="text-sky-100">Dodatki do dyżuru:</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAction("o")}
+                    className={`rounded-full px-3 py-1 ${activeAction === "o" ? "bg-emerald-300 text-emerald-950" : "border border-sky-200/40 text-sky-100"}`}
+                  >
+                    o (ostra)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAction("r")}
+                    className={`rounded-full px-3 py-1 ${activeAction === "r" ? "bg-purple-300 text-purple-950" : "border border-sky-200/40 text-sky-100"}`}
+                  >
+                    r (rehabilitacja)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAction("k")}
+                    className={`rounded-full px-3 py-1 ${activeAction === "k" ? "bg-amber-300 text-amber-950" : "border border-sky-200/40 text-sky-100"}`}
+                  >
+                    K (koordynujący)
+                  </button>
+                </div>
+                <span className="text-[11px] text-sky-200/80">
+                  Krótkie godziny (np. 6:10) są traktowane jako dyżur dzienny; dyżury nocne nie mają skróconych godzin.
+                </span>
+              </div>
+
+              <div className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-sky-200/30 bg-slate-950/60 px-4 py-3 text-[12px] font-semibold">
+                <div className="flex flex-col gap-1">
+                  <span className="text-sky-100">Święta własne:</span>
+                  <p className="text-[11px] font-normal text-sky-100/80">Zaznacz dzień na czerwono lub odznacz go z grafiku.</p>
+                </div>
+                <div className="flex items-center gap-2 text-[11px]">
+                  <input
+                    type="number"
+                    min={1}
+                    max={days.length}
+                    value={customHolidayInput}
+                    onChange={(e) => setCustomHolidayInput(e.target.value)}
                     className="w-20 rounded-lg border border-sky-200/40 bg-slate-900 px-2 py-1 text-xs text-sky-50 outline-none focus:border-sky-200 focus:ring-2 focus:ring-sky-300/60"
-                    placeholder="6:10"
+                    placeholder="np. 15"
                   />
                   <button
                     type="button"
-                    onClick={() => handleSelectAction("hours")}
-                    className={`rounded-full px-2 py-1 text-[11px] ${activeAction === "hours" ? "bg-sky-200 text-slate-900" : "bg-slate-800 text-sky-100"}`}
+                    onClick={handleCustomHolidaySubmit}
+                    className="rounded-full border border-sky-200/40 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/20"
                   >
-                    Ustaw
+                    Dodaj / usuń
                   </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleSelectAction("clear")}
-                  className={`rounded-full px-3 py-1 ${activeAction === "clear" ? "bg-slate-200 text-slate-900 shadow" : "border border-sky-200/40 text-sky-100"}`}
-                >
-                  Wyczyść pole
-                </button>
               </div>
-            </div>
 
-            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-sky-200/30 bg-slate-950/60 px-4 py-3 text-[12px] font-semibold">
-              <span className="text-sky-100">Dodatki do dyżuru:</span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleSelectAction("o")}
-                  className={`rounded-full px-3 py-1 ${activeAction === "o" ? "bg-emerald-300 text-emerald-950" : "border border-sky-200/40 text-sky-100"}`}
-                >
-                  o (ostra)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSelectAction("r")}
-                  className={`rounded-full px-3 py-1 ${activeAction === "r" ? "bg-purple-300 text-purple-950" : "border border-sky-200/40 text-sky-100"}`}
-                >
-                  r (rehabilitacja)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSelectAction("k")}
-                  className={`rounded-full px-3 py-1 ${activeAction === "k" ? "bg-amber-300 text-amber-950" : "border border-sky-200/40 text-sky-100"}`}
-                >
-                  K (koordynujący)
-                </button>
+              <div id="grafik" className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleMonthChange(-1)}
+                    className="rounded-full border border-sky-200/40 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/10"
+                  >
+                    Poprzedni
+                  </button>
+                  <button
+                    onClick={() => setCurrentMonth(new Date())}
+                    className="rounded-full border border-sky-200/40 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/10"
+                  >
+                    Dzisiaj
+                  </button>
+                  <button
+                    onClick={() => handleMonthChange(1)}
+                    className="rounded-full border border-sky-200/40 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/10"
+                  >
+                    Następny
+                  </button>
+                </div>
+                <p className="text-sm font-semibold text-sky-50">{getMonthLabel(currentMonth)}</p>
               </div>
-              <span className="text-[11px] text-sky-200/80">
-                Krótkie godziny (np. 6:10) są traktowane jako dyżur dzienny; dyżury nocne nie mają skróconych godzin.
-              </span>
-            </div>
 
-            <div className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-sky-200/30 bg-slate-950/60 px-4 py-3 text-[12px] font-semibold">
-              <div className="flex flex-col gap-1">
-                <span className="text-sky-100">Święta własne:</span>
-                <p className="text-[11px] font-normal text-sky-100/80">Zaznacz dzień na czerwono lub odznacz go z grafiku.</p>
-              </div>
-              <div className="flex items-center gap-2 text-[11px]">
-                <input
-                  type="number"
-                  min={1}
-                  max={days.length}
-                  value={customHolidayInput}
-                  onChange={(e) => setCustomHolidayInput(e.target.value)}
-                  className="w-20 rounded-lg border border-sky-200/40 bg-slate-900 px-2 py-1 text-xs text-sky-50 outline-none focus:border-sky-200 focus:ring-2 focus:ring-sky-300/60"
-                  placeholder="np. 15"
-                />
-                <button
-                  type="button"
-                  onClick={handleCustomHolidaySubmit}
-                  className="rounded-full border border-sky-200/40 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/20"
-                >
-                  Dodaj / usuń
-                </button>
-              </div>
-            </div>
-
-            <div id="grafik" className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleMonthChange(-1)}
-                  className="rounded-full border border-sky-200/40 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/10"
-                >
-                  Poprzedni
-                </button>
-                <button
-                  onClick={() => setCurrentMonth(new Date())}
-                  className="rounded-full border border-sky-200/40 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/10"
-                >
-                  Dzisiaj
-                </button>
-                <button
-                  onClick={() => handleMonthChange(1)}
-                  className="rounded-full border border-sky-200/40 px-3 py-1 text-xs font-semibold text-sky-50 transition hover:bg-sky-400/10"
-                >
-                  Następny
-                </button>
-              </div>
-              <p className="text-sm font-semibold text-sky-50">{getMonthLabel(currentMonth)}</p>
-            </div>
-
-            <div className="relative w-full overflow-hidden rounded-2xl border border-sky-200/30">
-              <div className="w-full overflow-x-auto overscroll-x-contain">
-                <table className="min-w-[1200px] text-[11px] text-sky-50">
-                  <thead className="bg-slate-900/60">
-                    <tr>
-                      <th className="sticky left-0 z-20 bg-slate-900/60 px-4 py-3 text-left text-xs font-semibold">Pracownik</th>
-                    {days.map((day) => (
-                      <th
-                        key={`day-header-${day.dayNumber}`}
-                        className={`${getDayCellClasses(day, true)} relative text-center text-[10px] font-semibold`}
-                      >
-                        <div className="flex flex-col items-center gap-0.5">
-                          <span className="text-xs">{day.dayNumber}</span>
-                          <span className="text-[10px] uppercase tracking-wide opacity-80">{day.label.slice(0, 3)}</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleToggleHoliday(day.dayNumber)}
-                          className={`absolute right-1 top-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                            customHolidaySet.has(day.dayNumber)
-                              ? "bg-rose-400 text-rose-950"
-                              : "border border-sky-200/40 text-sky-100"
-                          }`}
-                          title="Zaznacz / odznacz święto"
+              <div className="relative w-full overflow-hidden rounded-2xl border border-sky-200/30">
+                <div className="w-full overflow-x-auto overscroll-x-contain">
+                  <table className="min-w-[1200px] text-[11px] text-sky-50">
+                    <thead className="bg-slate-900/60">
+                      <tr>
+                        <th className="sticky left-0 z-20 bg-slate-900/60 px-4 py-3 text-left text-xs font-semibold">Pracownik</th>
+                      {days.map((day) => (
+                        <th
+                          key={`day-header-${day.dayNumber}`}
+                          className={`${getDayCellClasses(day, true)} relative text-center text-[10px] font-semibold`}
                         >
-                          Ś
-                        </button>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {groupedEmployees.map((group, groupIndex) => (
-                    <Fragment key={`group-${group.position}`}>
-                      {groupIndex > 0 && (
-                        <tr>
-                          <td colSpan={days.length + 1} className="h-2 bg-slate-950/60" />
-                        </tr>
-                      )}
-                      {group.items.map((employee) => (
-                        <tr key={`row-${employee.id}`} className="odd:bg-slate-900/40 even:bg-slate-900/20">
-                          <td className="sticky left-0 z-10 bg-slate-950/80 px-4 py-3 text-left">
-                            <div className="font-semibold">{employee.firstName} {employee.lastName}</div>
-                            <div className="text-[10px] uppercase tracking-wide text-sky-100/70">{employee.position}</div>
-                          </td>
-                          {days.map((day) => {
-                            const entry = scheduleEntries[employee.id];
-                            const value = entry?.shifts?.[day.dayNumber] || "";
-                            const tone = deriveShiftTone(value);
-                            const badges = extractShiftBadges(value);
-                            return (
-                              <td
-                                key={`${employee.id}-day-${day.dayNumber}`}
-                                className={`${getDayCellClasses(day, true)} text-center align-middle`}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => handleApplyShift(employee.id, day.dayNumber)}
-                                  className={`relative mx-auto flex h-12 w-16 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold transition hover:scale-105 focus:outline-none focus:ring-2 focus:ring-sky-300/60 ${tone}`}
-                                  title="Kliknij, aby ustawić dyżur zgodnie z wybranym trybem"
-                                >
-                                  {badges.hasK && (
-                                    <span className="absolute left-1 top-1 rounded-sm bg-red-700 px-1 text-[10px] font-bold text-red-50 shadow-lg">
-                                      K
-                                    </span>
-                                  )}
-                                  <div className="absolute right-1 top-1 flex flex-col gap-1">
-                                    {badges.hasO && (
-                                      <span className="rounded-sm bg-emerald-400 px-1 text-[10px] font-bold text-emerald-950 shadow">
-                                        O
-                                      </span>
-                                    )}
-                                    {badges.hasR && (
-                                      <span className="rounded-sm bg-sky-300 px-1 text-[10px] font-bold text-sky-950 shadow">
-                                        R
-                                      </span>
-                                    )}
-                                  </div>
-                                  <span className="text-sm font-bold tracking-wide">{badges.base}</span>
-                                </button>
-                              </td>
-                            );
-                          })}
-                        </tr>
+                          <div className="flex flex-col items-center gap-0.5">
+                            <span className="text-xs">{day.dayNumber}</span>
+                            <span className="text-[10px] uppercase tracking-wide opacity-80">{day.label.slice(0, 3)}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleHoliday(day.dayNumber)}
+                            className={`absolute right-1 top-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              customHolidaySet.has(day.dayNumber)
+                                ? "bg-rose-400 text-rose-950"
+                                : "border border-sky-200/40 text-sky-100"
+                            }`}
+                            title="Zaznacz / odznacz święto"
+                          >
+                            Ś
+                          </button>
+                        </th>
                       ))}
-                    </Fragment>
-                  ))}
-
-                  {!visibleEmployees.length && (
-                    <tr>
-                      <td
-                        colSpan={days.length + 1}
-                        className="px-4 py-6 text-center text-sm text-sky-100/80"
-                      >
-                        Brak pracowników. Dodaj pracownika w panelu powyżej.
-                      </td>
                     </tr>
-                  )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                  </thead>
+                  <tbody>
+                    {groupedEmployees.map((group, groupIndex) => (
+                      <Fragment key={`group-${group.position}`}>
+                        {groupIndex > 0 && (
+                          <tr>
+                            <td colSpan={days.length + 1} className="h-2 bg-slate-950/60" />
+                          </tr>
+                        )}
+                        {group.items.map((employee) => (
+                          <tr key={`row-${employee.id}`} className="odd:bg-slate-900/40 even:bg-slate-900/20">
+                            <td className="sticky left-0 z-10 bg-slate-950/80 px-4 py-3 text-left">
+                              <div className="font-semibold">{employee.firstName} {employee.lastName}</div>
+                              <div className="text-[10px] uppercase tracking-wide text-sky-100/70">{employee.position}</div>
+                            </td>
+                            {days.map((day) => {
+                              const entry = scheduleEntries[employee.id];
+                              const value = entry?.shifts?.[day.dayNumber] || "";
+                              const tone = deriveShiftTone(value);
+                              const badges = extractShiftBadges(value);
+                              return (
+                                <td
+                                  key={`${employee.id}-day-${day.dayNumber}`}
+                                  className={`${getDayCellClasses(day, true)} text-center align-middle`}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApplyShift(employee.id, day.dayNumber)}
+                                    className={`relative mx-auto flex h-12 w-16 items-center justify-center rounded-md border border-sky-200/30 px-2 text-[11px] font-semibold transition hover:scale-105 focus:outline-none focus:ring-2 focus:ring-sky-300/60 ${tone}`}
+                                    title="Kliknij, aby ustawić dyżur zgodnie z wybranym trybem"
+                                  >
+                                    {badges.hasK && (
+                                      <span className="absolute left-1 top-1 rounded-sm bg-red-700 px-1 text-[10px] font-bold text-red-50 shadow-lg">
+                                        K
+                                      </span>
+                                    )}
+                                    <div className="absolute right-1 top-1 flex flex-col gap-1">
+                                      {badges.hasO && (
+                                        <span className="rounded-sm bg-emerald-400 px-1 text-[10px] font-bold text-emerald-950 shadow">
+                                          O
+                                        </span>
+                                      )}
+                                      {badges.hasR && (
+                                        <span className="rounded-sm bg-sky-300 px-1 text-[10px] font-bold text-sky-950 shadow">
+                                          R
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="text-sm font-bold tracking-wide">{badges.base}</span>
+                                  </button>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </Fragment>
+                    ))}
 
-            <div className="mt-4 rounded-2xl border border-sky-200/30 bg-slate-950/60 p-4 text-xs text-sky-100/80">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-4">
-                <p>
-                  Krótkie dyżury wpisuj w formacie <strong>6:10</strong>. Litera <strong>o</strong> lub <strong>r</strong> oznacza stronę oddziału, a
-                  <strong> K</strong> wyróżnia pielęgniarkę/pielęgniarza koordynującego. <strong>1</strong> to etat 8h (Pn–Pt).
-                </p>
-                <button
-                  onClick={handleSaveSchedule}
-                  disabled={scheduleSaving || loadingData || !scheduleDirty}
-                  className="w-full rounded-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 md:w-auto"
-                >
-                  {scheduleSaving ? "Zapisywanie..." : scheduleDirty ? "Zapisz grafik" : "Grafik zapisany"}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="glass-panel min-w-0 rounded-3xl p-5 md:p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Podgląd ustawień</h2>
-                <p className="text-xs text-sky-100/80">Aktualny tryb wstawiania dyżurów.</p>
-              </div>
-              <span className="rounded-full bg-sky-400/10 px-3 py-1 text-[11px] font-semibold text-sky-100">{employees.length}</span>
-            </div>
-
-              <div className="space-y-3 text-sm text-sky-100/90">
-                <div className="rounded-2xl border border-sky-200/30 bg-slate-900/60 px-4 py-3">
-                  <p className="text-xs uppercase tracking-wide text-sky-200">Wybrany tryb</p>
-                  <p className="mt-1 text-base font-semibold text-sky-50">
-                    {activeAction === "D" && "Dzień (D)"}
-                    {activeAction === "N" && "Noc (N)"}
-                    {activeAction === "1" && "1 etat (8h)"}
-                    {activeAction === "hours" && `Godziny: ${hoursValue}`}
-                    {activeAction === "clear" && "Czyszczenie pola"}
-                    {(activeAction === "o" || activeAction === "r") &&
-                      `Dodatek: ${activeAction} + ${primaryShift === "hours" ? `godziny (${hoursValue})` : primaryShift}`}
-                    {activeAction === "k" &&
-                      `Dodatek: K + ${primaryShift === "hours" ? `godziny (${hoursValue})` : primaryShift}`}
-                  </p>
-                  <p className="mt-2 text-xs text-sky-100/70">
-                    Bazowy dyżur: {primaryShift === "hours" ? `godziny (${hoursValue})` : primaryShift}
-                  </p>
+                    {!visibleEmployees.length && (
+                      <tr>
+                        <td
+                          colSpan={days.length + 1}
+                          className="px-4 py-6 text-center text-sm text-sky-100/80"
+                        >
+                          Brak pracowników. Dodaj pracownika w panelu powyżej.
+                        </td>
+                      </tr>
+                    )}
+                    </tbody>
+                  </table>
                 </div>
+              </div>
 
-              <div className="rounded-2xl border border-sky-200/30 bg-slate-900/60 px-4 py-3">
-                <p className="text-xs uppercase tracking-wide text-sky-200">Święta własne</p>
-                <div className="mt-2 flex flex-wrap gap-2 text-[12px]">
-                  {customHolidays.length ? (
-                    customHolidays
-                      .sort((a, b) => a - b)
-                      .map((day) => (
-                        <span key={day} className="rounded-full bg-rose-400/20 px-3 py-1 text-rose-50">
-                          {day} {getMonthLabel(currentMonth)}
-                        </span>
-                      ))
-                  ) : (
-                    <span className="text-sky-100/70">Brak dodatkowych świąt w tym miesiącu.</span>
-                  )}
+              <div className="mt-4 rounded-2xl border border-sky-200/30 bg-slate-950/60 p-4 text-xs text-sky-100/80">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-4">
+                  <p>
+                    Krótkie dyżury wpisuj w formacie <strong>6:10</strong>. Litera <strong>o</strong> lub <strong>r</strong> oznacza stronę oddziału, a
+                    <strong> K</strong> wyróżnia pielęgniarkę/pielęgniarza koordynującego. <strong>1</strong> to etat 8h (Pn–Pt).
+                  </p>
+                  <button
+                    onClick={handleSaveSchedule}
+                    disabled={scheduleSaving || loadingData || !scheduleDirty}
+                    className="w-full rounded-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 md:w-auto"
+                  >
+                    {scheduleSaving ? "Zapisywanie..." : scheduleDirty ? "Zapisz grafik" : "Grafik zapisany"}
+                  </button>
                 </div>
               </div>
-
-              <div className="rounded-2xl border border-sky-200/30 bg-slate-900/60 px-4 py-3 text-xs text-sky-100/80">
-                <p>
-                  • Święta można zaznaczać przy nagłówkach dni (przycisk Ś).<br />• Litery <strong>o</strong> i <strong>r</strong> oznaczają odpowiednio ostrą i rehabilitacyjną część oddziału.<br />• Wpisanie liczby godzin (np. 6:10) ustawia dyżur dzienny z krótkim czasem pracy.
-                </p>
-              </div>
             </div>
-
             {loadingData && <p className="mt-4 text-xs text-sky-100/70">Trwa pobieranie danych...</p>}
-          </div>
-        </section>
-        </div>
+          </section>
+        )}
+
+        {activeSection === "generator" && (
+          <section className="rounded-3xl border border-sky-200/30 bg-slate-900/50 p-5 shadow-inner">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Generator grafików</h2>
+            <p className="mt-2 text-sm text-sky-100/80">
+              Sekcja w przygotowaniu. Wkrótce pojawi się tutaj generator automatycznych grafików.
+            </p>
+          </section>
+        )}
       </div>
     </main>
   );
