@@ -60,6 +60,8 @@ type Position =
   | "Terapeuta zajęciowy"
   | string;
 
+type ExtraRoleOption = "Brak" | "Oddziałowa" | "Zabiegowa";
+
 type EmploymentRate = "1 etat 12h" | "1 etat 8h" | "1/2 etatu" | "3/4 etatu";
 
 type AdminSection = "schedule" | "employees" | "generator";
@@ -71,6 +73,7 @@ type Employee = {
   firstName: string;
   lastName: string;
   position: Position;
+  extraRole?: ExtraRoleOption;
   employmentRate?: EmploymentRate;
   createdAt?: unknown;
 };
@@ -102,6 +105,8 @@ const POSITIONS = [
   "Sekretarka",
   "Terapeuta zajęciowy"
 ];
+
+const EXTRA_ROLES: ExtraRoleOption[] = ["Brak", "Oddziałowa", "Zabiegowa"];
 
 const EMPLOYMENT_RATES: EmploymentRate[] = ["1 etat 12h", "1 etat 8h", "1/2 etatu", "3/4 etatu"];
 
@@ -167,12 +172,13 @@ export default function AdminDashboardPage() {
   const [activeSection, setActiveSection] = useState<AdminSection>("schedule");
   const [employeeForm, setEmployeeForm] = useState<Pick<
     Employee,
-    "firstName" | "lastName" | "position" | "employmentRate"
+    "firstName" | "lastName" | "position" | "employmentRate" | "extraRole"
   >>({
     firstName: "",
     lastName: "",
     position: POSITIONS[0],
-    employmentRate: EMPLOYMENT_RATES[0]
+    employmentRate: EMPLOYMENT_RATES[0],
+    extraRole: "Brak"
   });
   const [formPending, setFormPending] = useState(false);
   const [activeAction, setActiveAction] = useState<ShiftAction>("D");
@@ -211,12 +217,13 @@ export default function AdminDashboardPage() {
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Pick<
     Employee,
-    "firstName" | "lastName" | "position" | "employmentRate"
+    "firstName" | "lastName" | "position" | "employmentRate" | "extraRole"
   >>({
     firstName: "",
     lastName: "",
     position: POSITIONS[0],
-    employmentRate: EMPLOYMENT_RATES[0]
+    employmentRate: EMPLOYMENT_RATES[0],
+    extraRole: "Brak"
   });
   const [generatorRequests, setGeneratorRequests] = useState<TimeOffRequest[]>([]);
   const [generatorForm, setGeneratorForm] = useState<{
@@ -275,6 +282,7 @@ export default function AdminDashboardPage() {
           return {
             id: docSnap.id,
             ...data,
+            extraRole: (data.extraRole as ExtraRoleOption | undefined) ?? "Brak",
             employmentRate: (data.employmentRate as EmploymentRate | undefined) ?? EMPLOYMENT_RATES[0]
           };
         });
@@ -330,15 +338,23 @@ export default function AdminDashboardPage() {
   }, [employees, generatorForm.employeeId]);
 
   const generatorEmployees = useMemo<GeneratorEmployee[]>(() => {
-    const mapRole = (position: string): GeneratorEmployee["role"] => {
+    const mapBaseRole = (position: string): GeneratorEmployee["baseRole"] => {
       const normalized = (position || "").toLowerCase();
-      if (normalized.includes("magazynier")) return "magazynierka";
-      if (normalized.includes("sekret")) return "sekretarka";
-      if (normalized.includes("terapeuta") && normalized.includes("zaj")) return "terapeuta_zajeciowy";
-      if (normalized.includes("sanitariusz")) return "sanitariusz";
-      if (normalized.includes("salow")) return "salowa";
-      if (normalized.includes("opiekun")) return "opiekun";
-      return "pielegniarka";
+      if (normalized.includes("magazynier")) return "MAGAZYNIER";
+      if (normalized.includes("sekret")) return "SEKRETARKA";
+      if (normalized.includes("terapeuta") && normalized.includes("zaj")) return "TERAPEUTA";
+      if (normalized.includes("sanitariusz")) return "SANITARIUSZ";
+      if (normalized.includes("salow")) return "SALOWA";
+      if (normalized.includes("opiekun")) return "OPIEKUN";
+      return "PIELEGNIARKA";
+    };
+
+    const mapExtraRole = (extraRole?: string, fallback?: string): GeneratorEmployee["extraRole"] => {
+      const source = (extraRole || fallback || "").toLowerCase();
+      const normalized = source.replace("ł", "l");
+      if (normalized.includes("oddzial")) return "ODDZIALOWA";
+      if (normalized.includes("zabieg")) return "ZABIEGOWA";
+      return "NONE";
     };
 
     const mapFte = (employmentRate?: string): GeneratorEmployee["fteType"] => {
@@ -354,14 +370,22 @@ export default function AdminDashboardPage() {
       }
     };
 
-    return employees.map((employee) => ({
-      id: employee.id,
-      firstName: employee.firstName,
-      lastName: employee.lastName,
-      role: mapRole(employee.position),
-      fteType: mapFte(employee.employmentRate),
-      canWorkNights: mapFte(employee.employmentRate) !== "1_etat_8h"
-    }));
+    return employees.map((employee) => {
+      const baseRole = mapBaseRole(employee.position);
+      const extraRole = mapExtraRole(employee.extraRole, employee.position);
+      const fte = mapFte(employee.employmentRate);
+      const isEightHour = fte === "1_etat_8h" || extraRole !== "NONE" || baseRole === "SEKRETARKA" || baseRole === "TERAPEUTA" || baseRole === "MAGAZYNIER";
+
+      return {
+        id: employee.id,
+        firstName: employee.firstName,
+        lastName: employee.lastName,
+        baseRole,
+        extraRole,
+        fteType: fte,
+        canWorkNights: !isEightHour
+      };
+    });
   }, [employees]);
 
   const handleGeneratorFormChange = (key: keyof typeof generatorForm, value: string) => {
@@ -492,6 +516,7 @@ export default function AdminDashboardPage() {
         lastName: trimmedLast,
         position: employeeForm.position,
         employmentRate: employeeForm.employmentRate,
+        extraRole: employeeForm.extraRole,
         createdAt: serverTimestamp()
       };
 
@@ -511,7 +536,8 @@ export default function AdminDashboardPage() {
         firstName: "",
         lastName: "",
         position: POSITIONS[0],
-        employmentRate: EMPLOYMENT_RATES[0]
+        employmentRate: EMPLOYMENT_RATES[0],
+        extraRole: "Brak"
       });
       setStatus({ type: "success", text: "Dodano pracownika." });
     } catch (error) {
@@ -574,7 +600,8 @@ export default function AdminDashboardPage() {
       firstName: employee.firstName,
       lastName: employee.lastName,
       position: employee.position,
-      employmentRate: (employee.employmentRate as EmploymentRate | undefined) ?? EMPLOYMENT_RATES[0]
+      employmentRate: (employee.employmentRate as EmploymentRate | undefined) ?? EMPLOYMENT_RATES[0],
+      extraRole: (employee.extraRole as ExtraRoleOption | undefined) ?? "Brak"
     });
   };
 
@@ -584,7 +611,8 @@ export default function AdminDashboardPage() {
       firstName: "",
       lastName: "",
       position: POSITIONS[0],
-      employmentRate: EMPLOYMENT_RATES[0]
+      employmentRate: EMPLOYMENT_RATES[0],
+      extraRole: "Brak"
     });
   };
 
@@ -615,7 +643,8 @@ export default function AdminDashboardPage() {
           firstName: trimmedFirst,
           lastName: trimmedLast,
           position: editForm.position,
-          employmentRate: editForm.employmentRate
+          employmentRate: editForm.employmentRate,
+          extraRole: editForm.extraRole
         },
         { merge: true }
       );
@@ -628,7 +657,8 @@ export default function AdminDashboardPage() {
                 firstName: trimmedFirst,
                 lastName: trimmedLast,
                 position: editForm.position,
-                employmentRate: editForm.employmentRate
+                employmentRate: editForm.employmentRate,
+                extraRole: editForm.extraRole
               }
             : emp
         )
@@ -1002,6 +1032,20 @@ export default function AdminDashboardPage() {
                         </select>
                       </div>
                       <div className="space-y-1">
+                        <label className="text-xs uppercase tracking-wide text-rose-100">Dodatkowa funkcja</label>
+                        <select
+                          value={employeeForm.extraRole}
+                          onChange={(e) => setEmployeeForm((prev) => ({ ...prev, extraRole: e.target.value as ExtraRoleOption }))}
+                          className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                        >
+                          {EXTRA_ROLES.map((roleOption) => (
+                            <option key={roleOption} value={roleOption} className="bg-slate-900">
+                              {roleOption}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
                         <label className="text-xs uppercase tracking-wide text-rose-100">Etat</label>
                         <select
                           value={employeeForm.employmentRate}
@@ -1175,6 +1219,21 @@ export default function AdminDashboardPage() {
                     {POSITIONS.map((pos) => (
                       <option key={pos} value={pos} className="bg-slate-900">
                         {pos}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs uppercase tracking-wide text-rose-100">Dodatkowa funkcja</label>
+                  <select
+                    value={editForm.extraRole}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, extraRole: e.target.value as ExtraRoleOption }))}
+                    disabled={!editingEmployeeId}
+                    className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {EXTRA_ROLES.map((roleOption) => (
+                      <option key={roleOption} value={roleOption} className="bg-slate-900">
+                        {roleOption}
                       </option>
                     ))}
                   </select>
@@ -1689,7 +1748,12 @@ export default function AdminDashboardPage() {
                       ) : (
                         <ul className="mt-1 list-disc space-y-1 pl-5 text-amber-200">
                           {generatorResult.warnings.map((warning, index) => (
-                            <li key={index}>{warning}</li>
+                            <li key={index}>
+                              <span className="mr-2 rounded-full bg-amber-300/20 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-wide text-amber-100">
+                                {warning.code}
+                              </span>
+                              {warning.description}
+                            </li>
                           ))}
                         </ul>
                       )}
