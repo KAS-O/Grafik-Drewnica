@@ -19,12 +19,11 @@ import {
   doc,
   getDoc,
   getDocs,
-  getFirestore,
   serverTimestamp,
   setDoc,
   type Firestore
 } from "firebase/firestore";
-import { auth, app } from "../../../lib/firebase";
+import { auth, db as firestore } from "../../../lib/firebase";
 import { useAuth } from "../../../context/AuthContext";
 import {
   buildDays,
@@ -163,7 +162,7 @@ export default function AdminDashboardPage() {
   const [activeAction, setActiveAction] = useState<ShiftAction>("D");
   const [primaryShift, setPrimaryShift] = useState<ShiftTemplate>("D");
   const [hoursValue, setHoursValue] = useState("6:10");
-  const db: Firestore = useMemo(() => getFirestore(app), []);
+  const db: Firestore = firestore;
 
   useEffect(() => {
     if (!loading && !user) {

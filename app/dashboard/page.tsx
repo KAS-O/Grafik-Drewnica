@@ -3,8 +3,8 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
-import { collection, doc, getDoc, getDocs, getFirestore, type Firestore } from "firebase/firestore";
-import { auth, app } from "../../lib/firebase";
+import { collection, doc, getDoc, getDocs, type Firestore } from "firebase/firestore";
+import { auth, db as firestore } from "../../lib/firebase";
 import { useAuth } from "../../context/AuthContext";
 import {
   buildDays,
@@ -77,7 +77,7 @@ export default function DashboardPage() {
   const [scheduleEntries, setScheduleEntries] = useState<ScheduleEntries>({});
   const [loadingData, setLoadingData] = useState(false);
   const [status, setStatus] = useState<StatusState>({ type: "", text: "" });
-  const db: Firestore = useMemo(() => getFirestore(app), []);
+  const db: Firestore = firestore;
 
   useEffect(() => {
     if (!loading && !user) {
