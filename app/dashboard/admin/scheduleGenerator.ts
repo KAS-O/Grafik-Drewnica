@@ -1,13 +1,15 @@
 import { POLISH_HOLIDAYS } from "../utils";
 
-export type Role =
-  | "pielegniarka"
-  | "sanitariusz"
-  | "salowa"
-  | "opiekun"
-  | "magazynierka"
-  | "sekretarka"
-  | "terapeuta_zajeciowy";
+export type BaseRole =
+  | "PIELEGNIARKA"
+  | "SANITARIUSZ"
+  | "SALOWA"
+  | "OPIEKUN"
+  | "MAGAZYNIER"
+  | "SEKRETARKA"
+  | "TERAPEUTA";
+
+export type ExtraRole = "ODDZIALOWA" | "ZABIEGOWA" | "NONE";
 
 export type FteType = "1_etat_12h" | "1_etat_8h" | "0_5_etatu" | "0_75_etatu";
 
@@ -15,7 +17,8 @@ export type GeneratorEmployee = {
   id: string;
   firstName: string;
   lastName: string;
-  role: Role;
+  baseRole: BaseRole;
+  extraRole?: ExtraRole;
   fteType: FteType;
   canWorkNights?: boolean;
 };
@@ -28,8 +31,30 @@ export type TimeOffRequest = {
   endDay: number;
 };
 
+export type DayType = "WEEKDAY" | "WEEKEND" | "HOLIDAY";
+export type ShiftType = "DAY" | "NIGHT";
+
+export type WarningCode =
+  | "MISSING_ROLE"
+  | "INSUFFICIENT_STAFF"
+  | "MISSING_HEAD_NURSE"
+  | "HOURS_UNDER_NORM"
+  | "HOURS_OVER_NORM"
+  | "REST_VIOLATION_DAILY"
+  | "REST_VIOLATION_WEEKLY";
+
+export type WarningEntry = {
+  date: string; // YYYY-MM-DD
+  shift: ShiftType;
+  dayType: DayType;
+  code: WarningCode;
+  employees: string[];
+  description: string;
+};
+
 export type ScheduleResult = {
   schedule: Record<string, Record<number, string>>;
+  headNurseByDay: Record<number, string | null>;
   hoursSummary: Record<
     string,
     {
@@ -38,28 +63,88 @@ export type ScheduleResult = {
       difference: number;
     }
   >;
-  warnings: string[];
+  warnings: WarningEntry[];
 };
 
-export type StaffRequirements = {
-  dayShift: {
-    pielegniarka: number;
-    sanitariusz: number;
-    salowa: number;
-    opiekun: { min: number; max: number };
-    magazynierka: number;
-    sekretarka: number;
-    terapeuta_zajeciowy: number;
-  };
-  nightShift: {
-    pielegniarka: number;
-    sanitariusz: number;
-    salowa: number;
-    opiekun: { min: number; max: number };
-    magazynierka: number;
-    sekretarka: number;
-    terapeuta_zajeciowy: number;
-  };
+type StaffRequirement = {
+  headNurse: number;
+  zabiegowa: number;
+  nurses: { min: number; max?: number; regularOnly?: boolean };
+  sanitariusz: number;
+  salowa: number;
+  opiekun: { min: number; max: number };
+  supportAtNight?: number; // sanitariusz OR salowa OR opiekun
+};
+
+export type StaffRequirements = Record<
+  DayType,
+  {
+    DAY: StaffRequirement;
+    NIGHT: StaffRequirement;
+  }
+>;
+
+const DEFAULT_STAFF_REQUIREMENTS: StaffRequirements = {
+  WEEKDAY: {
+    DAY: {
+      headNurse: 1,
+      zabiegowa: 1,
+      nurses: { min: 2, regularOnly: true },
+      sanitariusz: 1,
+      salowa: 2,
+      opiekun: { min: 0, max: 1 },
+      supportAtNight: 0
+    },
+    NIGHT: {
+      headNurse: 0,
+      zabiegowa: 0,
+      nurses: { min: 2 },
+      sanitariusz: 0,
+      salowa: 0,
+      opiekun: { min: 0, max: 1 },
+      supportAtNight: 1
+    }
+  },
+  WEEKEND: {
+    DAY: {
+      headNurse: 0,
+      zabiegowa: 0,
+      nurses: { min: 2, max: 3 },
+      sanitariusz: 1,
+      salowa: 2,
+      opiekun: { min: 0, max: 1 },
+      supportAtNight: 0
+    },
+    NIGHT: {
+      headNurse: 0,
+      zabiegowa: 0,
+      nurses: { min: 2 },
+      sanitariusz: 0,
+      salowa: 0,
+      opiekun: { min: 0, max: 1 },
+      supportAtNight: 1
+    }
+  },
+  HOLIDAY: {
+    DAY: {
+      headNurse: 0,
+      zabiegowa: 0,
+      nurses: { min: 2, max: 3 },
+      sanitariusz: 1,
+      salowa: 2,
+      opiekun: { min: 0, max: 1 },
+      supportAtNight: 0
+    },
+    NIGHT: {
+      headNurse: 0,
+      zabiegowa: 0,
+      nurses: { min: 2 },
+      sanitariusz: 0,
+      salowa: 0,
+      opiekun: { min: 0, max: 1 },
+      supportAtNight: 1
+    }
+  }
 };
 
 const DEFAULT_CONFIG = {
@@ -68,28 +153,18 @@ const DEFAULT_CONFIG = {
   maxDailyHours: 13,
   minShiftLength: 6,
   baseWorkingDayHours: 8,
-  staffRequirements: {
-    dayShift: {
-      pielegniarka: 3,
-      sanitariusz: 1,
-      salowa: 2,
-      opiekun: { min: 0, max: 1 },
-      magazynierka: 0,
-      sekretarka: 0,
-      terapeuta_zajeciowy: 0
-    },
-    nightShift: {
-      pielegniarka: 1,
-      sanitariusz: 0,
-      salowa: 0,
-      opiekun: { min: 0, max: 1 },
-      magazynierka: 0,
-      sekretarka: 0,
-      terapeuta_zajeciowy: 0
-    }
-  } satisfies StaffRequirements,
+  staffRequirements: DEFAULT_STAFF_REQUIREMENTS,
   holidays: POLISH_HOLIDAYS
 };
+
+function shuffleArray<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
 
 function getHoursForShift(value: string): number {
   if (!value) return 0;
@@ -155,11 +230,13 @@ function ensureWeeklyRest(schedule: Record<number, string>, totalDays: number): 
   return true;
 }
 
-function isWeekendOrHoliday(year: number, monthIndex: number, day: number, holidays: Set<string>) {
+function getDayType(year: number, monthIndex: number, day: number, holidays: Set<string>): DayType {
   const current = new Date(year, monthIndex, day);
   const weekday = current.getDay();
   const key = `${`${monthIndex + 1}`.padStart(2, "0")}-${`${day}`.padStart(2, "0")}`;
-  return weekday === 0 || weekday === 6 || holidays.has(key);
+  if (holidays.has(key)) return "HOLIDAY";
+  if (weekday === 0 || weekday === 6) return "WEEKEND";
+  return "WEEKDAY";
 }
 
 function expandRequests(requests: TimeOffRequest[]) {
@@ -178,28 +255,56 @@ function expandRequests(requests: TimeOffRequest[]) {
   return { blockedDays: map, preferDays: preferMap };
 }
 
+function formatDate(year: number, monthIndex: number, day: number) {
+  const month = `${monthIndex + 1}`.padStart(2, "0");
+  const dayStr = `${day}`.padStart(2, "0");
+  return `${year}-${month}-${dayStr}`;
+}
+
+function isEightHourWorker(employee: GeneratorEmployee) {
+  if (employee.extraRole === "ODDZIALOWA" || employee.extraRole === "ZABIEGOWA") return true;
+  if (employee.fteType === "1_etat_8h") return true;
+  if (employee.baseRole === "SEKRETARKA" || employee.baseRole === "TERAPEUTA" || employee.baseRole === "MAGAZYNIER") {
+    return true;
+  }
+  return false;
+}
+
+function workedHoursForEmployee(schedule: Record<string, Record<number, string>>, employeeId: string) {
+  const employeeSchedule = schedule[employeeId] || {};
+  return Object.values(employeeSchedule).reduce((sum, shift) => sum + getHoursForShift(shift), 0);
+}
+
 function selectCandidate(
   candidates: GeneratorEmployee[],
   schedule: Record<string, Record<number, string>>,
   day: number,
   shiftValue: string,
-  preferDays: Map<string, Set<number>>
+  preferDays: Map<string, Set<number>>,
+  dayType: DayType,
+  targets: Record<string, number>
 ) {
-  const sorted = [...candidates].sort((a, b) => {
-    const hoursA = Object.values(schedule[a.id] || {}).reduce((sum, shift) => sum + getHoursForShift(shift), 0);
-    const hoursB = Object.values(schedule[b.id] || {}).reduce((sum, shift) => sum + getHoursForShift(shift), 0);
+  const shuffled = shuffleArray(candidates);
+  const prioritized = shuffled.sort((a, b) => {
     const prefersA = preferDays.get(a.id)?.has(day) ? -1 : 0;
     const prefersB = preferDays.get(b.id)?.has(day) ? -1 : 0;
     if (prefersA !== prefersB) return prefersA - prefersB;
+    const hoursA = workedHoursForEmployee(schedule, a.id);
+    const hoursB = workedHoursForEmployee(schedule, b.id);
     if (hoursA !== hoursB) return hoursA - hoursB;
     return a.lastName.localeCompare(b.lastName, "pl");
   });
 
-  return sorted.find((candidate) => {
+  return prioritized.find((candidate) => {
+    if (shiftValue === "N" && candidate.canWorkNights === false) return false;
     const employeeSchedule = schedule[candidate.id] || {};
+    if (employeeSchedule[day]) return false;
+    if (isEightHourWorker(candidate) && dayType !== "WEEKDAY") return false;
     const previousShift = employeeSchedule[day - 1];
     if (hasDailyRestConflict(previousShift, shiftValue)) return false;
-    if (shiftValue !== "N" && employeeSchedule[day] === "N") return false;
+    const worked = workedHoursForEmployee(schedule, candidate.id);
+    const nextHours = worked + getHoursForShift(shiftValue);
+    if (nextHours - targets[candidate.id] > 0.1) return false;
     return true;
   });
 }
@@ -214,7 +319,7 @@ export function generateSchedule(
   const mergedConfig = { ...DEFAULT_CONFIG, ...config };
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
   const schedule: Record<string, Record<number, string>> = {};
-  const warnings: string[] = [];
+  const warnings: WarningEntry[] = [];
   const holidays = mergedConfig.holidays;
   const monthlyNorm = calculateMonthlyNorm(year, monthIndex, holidays);
   const targets = employees.reduce<Record<string, number>>((acc, employee) => {
@@ -222,97 +327,199 @@ export function generateSchedule(
     return acc;
   }, {});
   const { blockedDays, preferDays } = expandRequests(requests);
+  const headNurseByDay: Record<number, string | null> = {};
+  const employeeNames = employees.reduce<Record<string, string>>((acc, employee) => {
+    acc[employee.id] = `${employee.firstName} ${employee.lastName}`.trim();
+    return acc;
+  }, {});
 
   employees.forEach((employee) => {
     schedule[employee.id] = {};
   });
 
-  const eightHourWorkers = employees.filter((employee) => employee.fteType === "1_etat_8h");
-  const shiftWorkers = employees.filter((employee) => employee.fteType !== "1_etat_8h");
+  const eightHourWorkers = employees.filter((employee) => isEightHourWorker(employee));
+  const shiftWorkers = employees.filter((employee) => !isEightHourWorker(employee));
 
-  for (let day = 1; day <= daysInMonth; day++) {
-    const isHolidayOrWeekend = isWeekendOrHoliday(year, monthIndex, day, holidays);
+  const dayOrder = shuffleArray(Array.from({ length: daysInMonth }, (_, idx) => idx + 1));
+
+  for (const day of dayOrder) {
+    const dayType = getDayType(year, monthIndex, day, holidays);
+    const isWeekday = dayType === "WEEKDAY";
+    const requirement = mergedConfig.staffRequirements[dayType].DAY;
 
     const dayBlocked = new Set<string>();
     blockedDays.forEach((daysSet, employeeId) => {
       if (daysSet.has(day)) dayBlocked.add(employeeId);
     });
 
-    // 8h workers work only in business days
-    if (!isHolidayOrWeekend) {
-      eightHourWorkers.forEach((employee) => {
-        if (dayBlocked.has(employee.id)) return;
-        const employeeSchedule = schedule[employee.id];
-        const currentHours = Object.values(employeeSchedule).reduce(
-          (sum, value) => sum + getHoursForShift(value),
-          0
-        );
-        if (currentHours + 8 > targets[employee.id] + 4) return;
-        const prevShift = employeeSchedule[day - 1];
-        if (hasDailyRestConflict(prevShift, "1")) return;
-        employeeSchedule[day] = "1";
+    const assignShift = (employee: GeneratorEmployee, value: string) => {
+      schedule[employee.id][day] = value;
+    };
+
+    const tryAssign = (employee: GeneratorEmployee, value: string) => {
+      if (dayBlocked.has(employee.id)) return false;
+      const employeeSchedule = schedule[employee.id];
+      if (employeeSchedule[day]) return false;
+      if (isEightHourWorker(employee) && !isWeekday) return false;
+      const worked = workedHoursForEmployee(schedule, employee.id);
+      if (worked + getHoursForShift(value) - targets[employee.id] > 0.1) return false;
+      if (hasDailyRestConflict(employeeSchedule[day - 1], value)) return false;
+      assignShift(employee, value);
+      return true;
+    };
+
+    // Head nurse placement with substitution logic
+    headNurseByDay[day] = null;
+    if (requirement.headNurse > 0) {
+      const officialHeads = eightHourWorkers.filter((e) => e.extraRole === "ODDZIALOWA" && !dayBlocked.has(e.id));
+      const zabiegowaCandidates = eightHourWorkers.filter((e) => e.extraRole === "ZABIEGOWA" && !dayBlocked.has(e.id));
+      const regularNurses = employees.filter(
+        (e) => e.baseRole === "PIELEGNIARKA" && (e.extraRole ?? "NONE") === "NONE" && !dayBlocked.has(e.id)
+      );
+
+      const tryAssignHead = (candidates: GeneratorEmployee[]) => {
+        for (const candidate of shuffleArray(candidates)) {
+          if (tryAssign(candidate, "1")) {
+            headNurseByDay[day] = candidate.id;
+            return true;
+          }
+        }
+        return false;
+      };
+
+      const headPlaced = tryAssignHead(officialHeads) || tryAssignHead(zabiegowaCandidates) || tryAssignHead(regularNurses);
+
+      if (!headPlaced) {
+        warnings.push({
+          date: formatDate(year, monthIndex, day),
+          shift: "DAY",
+          dayType,
+          code: "MISSING_HEAD_NURSE",
+          employees: [],
+          description: `${formatDate(year, monthIndex, day)} (dzień): brak możliwości obsadzenia funkcji oddziałowej.`
+        });
+      }
+    }
+
+    // Zabiegowa requirement (can overlap with head nurse)
+    if (requirement.zabiegowa > 0) {
+      const alreadyZab = Object.entries(schedule).find(([empId, shifts]) => {
+        const shiftValue = shifts[day];
+        if (!shiftValue || shiftValue === "N") return false;
+        return employees.find((e) => e.id === empId && e.extraRole === "ZABIEGOWA");
+      });
+      let zabCount = alreadyZab ? 1 : 0;
+      const zabiegowePool = eightHourWorkers.filter((e) => e.extraRole === "ZABIEGOWA" && !dayBlocked.has(e.id));
+      while (zabCount < requirement.zabiegowa) {
+        const candidate = selectCandidate(zabiegowePool, schedule, day, "1", preferDays, dayType, targets);
+        if (!candidate) break;
+        if (schedule[candidate.id]?.[day]) {
+          zabCount += 1;
+          break;
+        }
+        assignShift(candidate, "1");
+        zabCount += 1;
+      }
+      if (zabCount < requirement.zabiegowa) {
+        warnings.push({
+          date: formatDate(year, monthIndex, day),
+          shift: "DAY",
+          dayType,
+          code: "MISSING_ROLE",
+          employees: [],
+          description: `${formatDate(year, monthIndex, day)} (dzień): brak osoby w roli Zabiegowa (brakuje ${requirement.zabiegowa - zabCount}).`
+        });
+      }
+    }
+
+    // Remaining 8h weekday staff
+    if (isWeekday) {
+      const poolEight = shuffleArray(
+        eightHourWorkers.filter((employee) => !dayBlocked.has(employee.id) && !schedule[employee.id][day])
+      );
+      poolEight.forEach((employee) => {
+        const worked = workedHoursForEmployee(schedule, employee.id);
+        if (worked + 8 - targets[employee.id] > 0.1) return;
+        tryAssign(employee, "1");
       });
     }
 
-    // Day shift staffing
-    const requirement = mergedConfig.staffRequirements.dayShift;
+    // Day shift staffing (12h roles)
     const pool = shiftWorkers.filter((employee) => !dayBlocked.has(employee.id));
 
-    const roleGroups: Record<Role, GeneratorEmployee[]> = {
-      pielegniarka: pool.filter((e) => e.role === "pielegniarka"),
-      sanitariusz: pool.filter((e) => e.role === "sanitariusz"),
-      salowa: pool.filter((e) => e.role === "salowa"),
-      opiekun: pool.filter((e) => e.role === "opiekun"),
-      magazynierka: pool.filter((e) => e.role === "magazynierka"),
-      sekretarka: pool.filter((e) => e.role === "sekretarka"),
-      terapeuta_zajeciowy: pool.filter((e) => e.role === "terapeuta_zajeciowy")
-    };
-
-    const dayAssignments: GeneratorEmployee[] = [];
-
-    const fillRole = (role: Role, needed: number, max?: number) => {
+    const fillRole = (baseRole: BaseRole, needed: number, max?: number, regularOnly?: boolean) => {
       let assigned = 0;
+      const candidates = pool.filter((e) => e.baseRole === baseRole && (!regularOnly || (e.extraRole ?? "NONE") === "NONE"));
       while (assigned < needed) {
-        const candidate = selectCandidate(roleGroups[role], schedule, day, "D", preferDays);
+        const candidate = selectCandidate(candidates, schedule, day, "D", preferDays, dayType, targets);
         if (!candidate) break;
-        schedule[candidate.id][day] = "D";
-        dayAssignments.push(candidate);
-        const index = roleGroups[role].findIndex((e) => e.id === candidate.id);
-        if (index !== -1) roleGroups[role].splice(index, 1);
+        if (schedule[candidate.id]?.[day]) {
+          assigned += 1;
+          break;
+        }
+        assignShift(candidate, "D");
         assigned += 1;
       }
       if (assigned < needed) {
-        warnings.push(
-          `Dzień ${day}: brak wymaganej obsady na dzień dla roli ${role} (brakuje ${needed - assigned}).`
-        );
+        warnings.push({
+          date: formatDate(year, monthIndex, day),
+          shift: "DAY",
+          dayType,
+          code: "MISSING_ROLE",
+          employees: candidates.map((c) => employeeNames[c.id]),
+          description: `${formatDate(year, monthIndex, day)} (dzień): brak wymaganej obsady dla roli ${baseRole.toLowerCase()} (brakuje ${needed - assigned}).`
+        });
       }
-      if (typeof max === "number") {
-        while (assigned > max) {
-          const removed = dayAssignments.findIndex((emp) => emp.role === role);
-          if (removed === -1) break;
-          delete schedule[dayAssignments[removed].id][day];
-          dayAssignments.splice(removed, 1);
-          assigned -= 1;
-        }
+      if (typeof max === "number" && assigned > max) {
+        warnings.push({
+          date: formatDate(year, monthIndex, day),
+          shift: "DAY",
+          dayType,
+          code: "INSUFFICIENT_STAFF",
+          employees: candidates.map((c) => employeeNames[c.id]),
+          description: `${formatDate(year, monthIndex, day)} (dzień): przekroczono maksymalną liczbę dla roli ${baseRole.toLowerCase()}.`
+        });
       }
     };
 
-    fillRole("sanitariusz", requirement.sanitariusz);
-    fillRole("salowa", requirement.salowa);
-    fillRole("pielegniarka", requirement.pielegniarka);
-    fillRole("opiekun", requirement.opiekun.min, requirement.opiekun.max);
-    fillRole("magazynierka", requirement.magazynierka);
-    fillRole("sekretarka", requirement.sekretarka);
-    fillRole("terapeuta_zajeciowy", requirement.terapeuta_zajeciowy);
+    fillRole("SANITARIUSZ", requirement.sanitariusz);
+    fillRole("SALOWA", requirement.salowa);
+    fillRole("PIELEGNIARKA", requirement.nurses.min, requirement.nurses.max, requirement.nurses.regularOnly);
+    fillRole("OPIEKUN", requirement.opiekun.min, requirement.opiekun.max);
 
-    // Night shift rotation (optional but helps norm)
-    const nightPool = pool.filter((employee) => employee.canWorkNights !== false);
-    const nightCandidate = selectCandidate(nightPool, schedule, day, "N", preferDays);
-    if (nightCandidate) {
-      const hours = Object.values(schedule[nightCandidate.id]).reduce((sum, value) => sum + getHoursForShift(value), 0);
-      if (hours + 12 <= targets[nightCandidate.id] + 6) {
-        schedule[nightCandidate.id][day] = "N";
+    // Night shift staffing
+    const nightRequirement = mergedConfig.staffRequirements[dayType].NIGHT;
+    const nightPool = pool.filter((employee) => employee.canWorkNights !== false && !schedule[employee.id][day]);
+
+    const assignNightRole = (predicate: (emp: GeneratorEmployee) => boolean, needed: number, label: string) => {
+      let assigned = 0;
+      const candidates = nightPool.filter(predicate);
+      while (assigned < needed) {
+        const candidate = selectCandidate(candidates, schedule, day, "N", preferDays, dayType, targets);
+        if (!candidate) break;
+        assignShift(candidate, "N");
+        assigned += 1;
       }
+      if (assigned < needed) {
+        warnings.push({
+          date: formatDate(year, monthIndex, day),
+          shift: "NIGHT",
+          dayType,
+          code: "MISSING_ROLE",
+          employees: candidates.map((c) => employeeNames[c.id]),
+          description: `${formatDate(year, monthIndex, day)} (noc): brak wymaganej obsady dla roli ${label} (brakuje ${needed - assigned}).`
+        });
+      }
+    };
+
+    assignNightRole((emp) => emp.baseRole === "PIELEGNIARKA", nightRequirement.nurses.min, "pielęgniarka");
+    const supportNeeded = nightRequirement.supportAtNight ?? 0;
+    if (supportNeeded > 0) {
+      assignNightRole(
+        (emp) => emp.baseRole === "SANITARIUSZ" || emp.baseRole === "SALOWA" || emp.baseRole === "OPIEKUN",
+        supportNeeded,
+        "sanitariusz/salowa/opiekun"
+      );
     }
   }
 
@@ -320,15 +527,17 @@ export function generateSchedule(
   employees.forEach((employee) => {
     const target = targets[employee.id];
     const employeeSchedule = schedule[employee.id];
-    const workedHours = Object.values(employeeSchedule).reduce((sum, value) => sum + getHoursForShift(value), 0);
+    const workedHours = workedHoursForEmployee(schedule, employee.id);
     const deficit = target - workedHours;
     if (deficit >= mergedConfig.minShiftLength) {
-      for (let day = 1; day <= daysInMonth; day++) {
+      const dayCandidates = shuffleArray(Array.from({ length: daysInMonth }, (_, idx) => idx + 1));
+      for (const day of dayCandidates) {
         if (employeeSchedule[day]) continue;
-        const isHolidayOrWeekend = isWeekendOrHoliday(year, monthIndex, day, holidays);
-        const blocked = blockedDays.get(employee.id)?.has(day);
-        if (blocked) continue;
-        if (employee.fteType === "1_etat_8h" && isHolidayOrWeekend) continue;
+        const dayType = getDayType(year, monthIndex, day, holidays);
+        if (isEightHourWorker(employee) && dayType !== "WEEKDAY") continue;
+        if (blockedDays.get(employee.id)?.has(day)) continue;
+        const prevShift = employeeSchedule[day - 1];
+        if (hasDailyRestConflict(prevShift, `${mergedConfig.minShiftLength}`)) continue;
         const length = Math.min(deficit, 11);
         if (length < mergedConfig.minShiftLength) break;
         employeeSchedule[day] = `${length}`;
@@ -342,62 +551,189 @@ export function generateSchedule(
 
   employees.forEach((employee) => {
     const employeeSchedule = schedule[employee.id];
-    const workedHours = Object.values(employeeSchedule).reduce((sum, value) => sum + getHoursForShift(value), 0);
+    const workedHours = workedHoursForEmployee(schedule, employee.id);
+    const diff = Math.round((workedHours - targets[employee.id]) * 100) / 100;
     hoursSummary[employee.id] = {
       targetHours: targets[employee.id],
       workedHours: Math.round(workedHours * 100) / 100,
-      difference: Math.round((workedHours - targets[employee.id]) * 100) / 100
+      difference: diff
     };
 
+    if (diff < 0) {
+      warnings.push({
+        date: "",
+        shift: "DAY",
+        dayType: "WEEKDAY",
+        code: "HOURS_UNDER_NORM",
+        employees: [employeeNames[employee.id]],
+        description: `Pracownik ${employeeNames[employee.id]} ma niedobór godzin względem normy (${Math.abs(diff)}h).`
+      });
+    }
+
     if (!ensureWeeklyRest(employeeSchedule, daysInMonth)) {
-      warnings.push(`Pracownik ${employee.firstName} ${employee.lastName} nie ma 35h odpoczynku w każdym tygodniu.`);
+      warnings.push({
+        date: "",
+        shift: "DAY",
+        dayType: "WEEKDAY",
+        code: "REST_VIOLATION_WEEKLY",
+        employees: [employeeNames[employee.id]],
+        description: `Pracownik ${employeeNames[employee.id]} nie ma zapewnionego 35h odpoczynku w każdym tygodniu.`
+      });
     }
   });
 
-  // Staffing validation
+  // Staffing validation per day
   for (let day = 1; day <= daysInMonth; day++) {
+    const dayType = getDayType(year, monthIndex, day, holidays);
+    const requirement = mergedConfig.staffRequirements[dayType].DAY;
+    const nightRequirement = mergedConfig.staffRequirements[dayType].NIGHT;
     const counters = {
       pielegniarka: 0,
+      pielegniarkaRegular: 0,
+      zabiegowa: 0,
       sanitariusz: 0,
       salowa: 0,
       opiekun: 0,
-      magazynierka: 0,
-      sekretarka: 0,
-      terapeuta_zajeciowy: 0
+      supportNight: 0,
+      nursesNight: 0
     };
+
+    const headForDay: string | null = headNurseByDay[day] ?? null;
+
     employees.forEach((employee) => {
       const shift = schedule[employee.id]?.[day];
       if (!shift) return;
-      if (shift === "D" || /^\d/.test(shift)) {
-        counters[employee.role] += 1;
+      const isNight = shift === "N";
+      const isDaytime = shift !== "N";
+
+      if (isDaytime) {
+        if (employee.extraRole === "ZABIEGOWA") counters.zabiegowa += 1;
+        if (employee.baseRole === "PIELEGNIARKA") counters.pielegniarka += 1;
+        if (employee.baseRole === "PIELEGNIARKA" && (employee.extraRole ?? "NONE") === "NONE") {
+          counters.pielegniarkaRegular += 1;
+        }
+        if (employee.baseRole === "SANITARIUSZ") counters.sanitariusz += 1;
+        if (employee.baseRole === "SALOWA") counters.salowa += 1;
+        if (employee.baseRole === "OPIEKUN") counters.opiekun += 1;
+      }
+
+      if (isNight) {
+        if (employee.baseRole === "PIELEGNIARKA") counters.nursesNight += 1;
+        if (employee.baseRole === "SANITARIUSZ" || employee.baseRole === "SALOWA" || employee.baseRole === "OPIEKUN") {
+          counters.supportNight += 1;
+        }
       }
     });
 
-    if (counters.pielegniarka < mergedConfig.staffRequirements.dayShift.pielegniarka) {
-      warnings.push(`Dzień ${day}: za mało pielęgniarek na dziennej zmianie.`);
+    if (requirement.headNurse > 0 && !headForDay) {
+      warnings.push({
+        date: formatDate(year, monthIndex, day),
+        shift: "DAY",
+        dayType,
+        code: "MISSING_HEAD_NURSE",
+        employees: [],
+        description: `${formatDate(year, monthIndex, day)} (dzień): brak osoby pełniącej funkcję oddziałowej.`
+      });
     }
-    if (counters.sanitariusz < mergedConfig.staffRequirements.dayShift.sanitariusz) {
-      warnings.push(`Dzień ${day}: za mało sanitariuszy na dziennej zmianie.`);
+
+    if (requirement.zabiegowa > 0 && counters.zabiegowa < requirement.zabiegowa) {
+      warnings.push({
+        date: formatDate(year, monthIndex, day),
+        shift: "DAY",
+        dayType,
+        code: "MISSING_ROLE",
+        employees: [],
+        description: `${formatDate(year, monthIndex, day)} (dzień): brak osoby w funkcji zabiegowej (brakuje ${requirement.zabiegowa - counters.zabiegowa}).`
+      });
     }
-    if (counters.salowa < mergedConfig.staffRequirements.dayShift.salowa) {
-      warnings.push(`Dzień ${day}: za mało salowych na dziennej zmianie.`);
+
+    if (requirement.nurses.regularOnly) {
+      if (counters.pielegniarkaRegular < requirement.nurses.min) {
+        warnings.push({
+          date: formatDate(year, monthIndex, day),
+          shift: "DAY",
+          dayType,
+          code: "MISSING_ROLE",
+          employees: [],
+          description: `${formatDate(year, monthIndex, day)} (dzień): za mało pielęgniarek bez funkcji (${counters.pielegniarkaRegular}/${requirement.nurses.min}).`
+        });
+      }
+    } else {
+      if (counters.pielegniarka < requirement.nurses.min) {
+        warnings.push({
+          date: formatDate(year, monthIndex, day),
+          shift: "DAY",
+          dayType,
+          code: "MISSING_ROLE",
+          employees: [],
+          description: `${formatDate(year, monthIndex, day)} (dzień): za mało pielęgniarek (${counters.pielegniarka}/${requirement.nurses.min}).`
+        });
+      }
+      if (requirement.nurses.max && counters.pielegniarka > requirement.nurses.max) {
+        warnings.push({
+          date: formatDate(year, monthIndex, day),
+          shift: "DAY",
+          dayType,
+          code: "INSUFFICIENT_STAFF",
+          employees: [],
+          description: `${formatDate(year, monthIndex, day)} (dzień): przekroczono maksymalną liczbę pielęgniarek (${counters.pielegniarka}/${requirement.nurses.max}).`
+        });
+      }
     }
-    if (
-      counters.opiekun < mergedConfig.staffRequirements.dayShift.opiekun.min ||
-      counters.opiekun > mergedConfig.staffRequirements.dayShift.opiekun.max
-    ) {
-      warnings.push(`Dzień ${day}: liczba opiekunów medycznych poza dozwolonym zakresem.`);
+
+    if (counters.sanitariusz < requirement.sanitariusz) {
+      warnings.push({
+        date: formatDate(year, monthIndex, day),
+        shift: "DAY",
+        dayType,
+        code: "MISSING_ROLE",
+        employees: [],
+        description: `${formatDate(year, monthIndex, day)} (dzień): brak sanitariusza (brakuje ${requirement.sanitariusz - counters.sanitariusz}).`
+      });
     }
-    if (counters.magazynierka < mergedConfig.staffRequirements.dayShift.magazynierka) {
-      warnings.push(`Dzień ${day}: za mało magazynierek na dziennej zmianie.`);
+    if (counters.salowa < requirement.salowa) {
+      warnings.push({
+        date: formatDate(year, monthIndex, day),
+        shift: "DAY",
+        dayType,
+        code: "MISSING_ROLE",
+        employees: [],
+        description: `${formatDate(year, monthIndex, day)} (dzień): brak salowych (brakuje ${requirement.salowa - counters.salowa}).`
+      });
     }
-    if (counters.sekretarka < mergedConfig.staffRequirements.dayShift.sekretarka) {
-      warnings.push(`Dzień ${day}: za mało sekretarek na dziennej zmianie.`);
+    if (counters.opiekun < requirement.opiekun.min || counters.opiekun > requirement.opiekun.max) {
+      warnings.push({
+        date: formatDate(year, monthIndex, day),
+        shift: "DAY",
+        dayType,
+        code: "MISSING_ROLE",
+        employees: [],
+        description: `${formatDate(year, monthIndex, day)} (dzień): liczba opiekunów poza zakresem (${counters.opiekun}, dozwolone ${requirement.opiekun.min}-${requirement.opiekun.max}).`
+      });
     }
-    if (counters.terapeuta_zajeciowy < mergedConfig.staffRequirements.dayShift.terapeuta_zajeciowy) {
-      warnings.push(`Dzień ${day}: za mało terapeutów zajęciowych na dziennej zmianie.`);
+
+    if (nightRequirement.nurses.min > 0 && counters.nursesNight < nightRequirement.nurses.min) {
+      warnings.push({
+        date: formatDate(year, monthIndex, day),
+        shift: "NIGHT",
+        dayType,
+        code: "MISSING_ROLE",
+        employees: [],
+        description: `${formatDate(year, monthIndex, day)} (noc): za mało pielęgniarek (${counters.nursesNight}/${nightRequirement.nurses.min}).`
+      });
+    }
+    const supportNeeded = nightRequirement.supportAtNight ?? 0;
+    if (supportNeeded > 0 && counters.supportNight < supportNeeded) {
+      warnings.push({
+        date: formatDate(year, monthIndex, day),
+        shift: "NIGHT",
+        dayType,
+        code: "MISSING_ROLE",
+        employees: [],
+        description: `${formatDate(year, monthIndex, day)} (noc): brak wymaganej osoby z grupy sanitariusz/salowa/opiekun (${counters.supportNight}/${supportNeeded}).`
+      });
     }
   }
 
-  return { schedule, hoursSummary, warnings };
+  return { schedule, headNurseByDay, hoursSummary, warnings };
 }

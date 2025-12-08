@@ -86,7 +86,7 @@ export function buildDays(date: Date, customHolidaySet: Set<number> = new Set())
 
 export function mergeEntriesWithEmployees(
   entries: Record<string, { shifts: Record<number, string>; fullName: string; position: string }> = {},
-  employees: { id: string; firstName: string; lastName: string; position: string }[]
+  employees: { id: string; firstName: string; lastName: string; position: string; extraRole?: string }[]
 ) {
   const combined: typeof entries = {};
 
@@ -128,7 +128,14 @@ export function normalizeScheduleEntries(
   return normalized;
 }
 
-export type SimpleEmployee = { id: string; firstName: string; lastName: string; position: string; employmentRate?: string };
+export type SimpleEmployee = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  position: string;
+  employmentRate?: string;
+  extraRole?: string;
+};
 
 export function sortEmployees(employees: SimpleEmployee[]): SimpleEmployee[] {
   const positionRank = (position: string) => {
