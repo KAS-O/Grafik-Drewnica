@@ -620,7 +620,7 @@ export default function AdminDashboardPage() {
   const visibleEmployees = sortedEmployees;
 
   return (
-    <main className="min-h-screen bg-slate-950 px-3 py-6 text-sky-50">
+    <main className="min-h-screen overflow-x-hidden bg-slate-950 px-3 py-6 text-sky-50">
       <div className="mx-auto w-full max-w-[1600px]">
         <div className="flex w-full flex-col gap-6">
         <header className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-rose-200/30 bg-rose-950/60 p-4 shadow-lg">
@@ -933,8 +933,8 @@ export default function AdminDashboardPage() {
           </form>
         </section>
 
-        <section className="grid gap-6 overflow-x-hidden lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="glass-panel rounded-3xl border border-sky-200/20 bg-slate-900/60 p-5 md:p-6">
+        <section className="grid min-w-0 gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="glass-panel min-w-0 rounded-3xl border border-sky-200/20 bg-slate-900/60 p-5 md:p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-col gap-1">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Edycja grafiku</h2>
@@ -1078,7 +1078,7 @@ export default function AdminDashboardPage() {
               <p className="text-sm font-semibold text-sky-50">{getMonthLabel(currentMonth)}</p>
             </div>
 
-            <div className="relative w-full overflow-x-hidden rounded-2xl border border-sky-200/30">
+            <div className="relative w-full overflow-hidden rounded-2xl border border-sky-200/30">
               <div className="w-full overflow-x-auto overscroll-x-contain">
                 <table className="min-w-[1200px] text-[11px] text-sky-50">
                   <thead className="bg-slate-900/60">
@@ -1181,22 +1181,24 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-sky-100/80">
-              <p>
-                Krótkie dyżury wpisuj w formacie <strong>6:10</strong>. Litera <strong>o</strong> lub <strong>r</strong> oznacza stronę oddziału, a
-                <strong> K</strong> wyróżnia pielęgniarkę/pielęgniarza koordynującego. <strong>1</strong> to etat 8h (Pn–Pt).
-              </p>
-              <button
-                onClick={handleSaveSchedule}
-                disabled={scheduleSaving || loadingData || !scheduleDirty}
-                className="rounded-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {scheduleSaving ? "Zapisywanie..." : scheduleDirty ? "Zapisz grafik" : "Grafik zapisany"}
-              </button>
+            <div className="mt-4 rounded-2xl border border-sky-200/30 bg-slate-950/60 p-4 text-xs text-sky-100/80">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-4">
+                <p>
+                  Krótkie dyżury wpisuj w formacie <strong>6:10</strong>. Litera <strong>o</strong> lub <strong>r</strong> oznacza stronę oddziału, a
+                  <strong> K</strong> wyróżnia pielęgniarkę/pielęgniarza koordynującego. <strong>1</strong> to etat 8h (Pn–Pt).
+                </p>
+                <button
+                  onClick={handleSaveSchedule}
+                  disabled={scheduleSaving || loadingData || !scheduleDirty}
+                  className="w-full rounded-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60 md:w-auto"
+                >
+                  {scheduleSaving ? "Zapisywanie..." : scheduleDirty ? "Zapisz grafik" : "Grafik zapisany"}
+                </button>
+              </div>
             </div>
           </div>
 
-          <div className="glass-panel rounded-3xl p-5 md:p-6">
+          <div className="glass-panel min-w-0 rounded-3xl p-5 md:p-6">
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Podgląd ustawień</h2>
