@@ -34,6 +34,7 @@ import {
   groupEmployeesByPosition,
   mergeEntriesWithEmployees,
   normalizeScheduleEntries,
+  POLISH_HOLIDAYS,
   sortEmployees,
   type DayCell,
   type SimpleEmployee
@@ -41,9 +42,13 @@ import {
 import { DaySummaryModal, type DayAssignment } from "../DaySummaryModal";
 import {
   generateSchedule,
+  calculateMonthlyNormHours,
+  type EducationLevel,
+  type ExperienceLevel,
   type GeneratorEmployee,
   type ScheduleResult,
-  type TimeOffRequest
+  type TimeOffRequest,
+  type WorkTimeNorm
 } from "./scheduleGenerator";
 
 export const dynamic = "force-dynamic";
@@ -62,6 +67,9 @@ type Position =
 
 type ExtraRoleOption = "Brak" | "Oddziałowa" | "Zabiegowa";
 
+type ExperienceLevelOption = "NOWY" | "DOSWIADCZONY" | "STANDARD";
+type EducationLevelOption = "LICENCJAT" | "MAGISTER" | "BRAK";
+
 type EmploymentRate = "1 etat 12h" | "1 etat 8h" | "1/2 etatu" | "3/4 etatu";
 
 type AdminSection = "schedule" | "employees" | "generator";
@@ -75,6 +83,8 @@ type Employee = {
   position: Position;
   extraRole?: ExtraRoleOption;
   employmentRate?: EmploymentRate;
+  experienceLevel?: ExperienceLevelOption;
+  educationLevel?: EducationLevelOption;
   createdAt?: unknown;
 };
 
@@ -107,6 +117,8 @@ const POSITIONS = [
 ];
 
 const EXTRA_ROLES: ExtraRoleOption[] = ["Brak", "Oddziałowa", "Zabiegowa"];
+const EXPERIENCE_LEVELS: ExperienceLevelOption[] = ["STANDARD", "DOSWIADCZONY", "NOWY"];
+const EDUCATION_LEVELS: EducationLevelOption[] = ["BRAK", "LICENCJAT", "MAGISTER"];
 
 const EMPLOYMENT_RATES: EmploymentRate[] = ["1 etat 12h", "1 etat 8h", "1/2 etatu", "3/4 etatu"];
 
@@ -172,13 +184,15 @@ export default function AdminDashboardPage() {
   const [activeSection, setActiveSection] = useState<AdminSection>("schedule");
   const [employeeForm, setEmployeeForm] = useState<Pick<
     Employee,
-    "firstName" | "lastName" | "position" | "employmentRate" | "extraRole"
+    "firstName" | "lastName" | "position" | "employmentRate" | "extraRole" | "experienceLevel" | "educationLevel"
   >>({
     firstName: "",
     lastName: "",
     position: POSITIONS[0],
     employmentRate: EMPLOYMENT_RATES[0],
-    extraRole: "Brak"
+    extraRole: "Brak",
+    experienceLevel: "STANDARD",
+    educationLevel: "BRAK"
   });
   const [formPending, setFormPending] = useState(false);
   const [activeAction, setActiveAction] = useState<ShiftAction>("D");
@@ -200,15 +214,18 @@ export default function AdminDashboardPage() {
   const customHolidaySet = useMemo(() => new Set(customHolidays), [customHolidays]);
   const days: DayCell[] = useMemo(() => buildDays(currentMonth, customHolidaySet), [currentMonth, customHolidaySet]);
   const monthLabel = useMemo(() => getMonthLabel(currentMonth), [currentMonth]);
-  const monthBounds = useMemo(() => {
-    const year = currentMonth.getFullYear();
-    const month = `${currentMonth.getMonth() + 1}`.padStart(2, "0");
-    const lastDay = `${days.length}`.padStart(2, "0");
-    return {
-      min: `${year}-${month}-01`,
-      max: `${year}-${month}-${lastDay}`
-    };
-  }, [currentMonth, days.length]);
+  const generatorHolidaySet = useMemo(() => {
+    const set = new Set(POLISH_HOLIDAYS);
+    const monthKey = `${`${currentMonth.getMonth() + 1}`.padStart(2, "0")}-`;
+    customHolidays.forEach((day) => {
+      set.add(`${monthKey}${`${day}`.padStart(2, "0")}`);
+    });
+    return set;
+  }, [customHolidays, currentMonth]);
+  const defaultMonthlyNorm = useMemo(
+    () => calculateMonthlyNormHours(currentMonth.getFullYear(), currentMonth.getMonth(), generatorHolidaySet),
+    [currentMonth, generatorHolidaySet]
+  );
   const groupedEmployees = useMemo(() => groupEmployeesByPosition(employees), [employees]);
   const sortedEmployees = useMemo(() => sortEmployees(employees), [employees]);
   const employeeMap = useMemo(() => new Map(employees.map((employee) => [employee.id, employee])), [employees]);
@@ -217,33 +234,39 @@ export default function AdminDashboardPage() {
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Pick<
     Employee,
-    "firstName" | "lastName" | "position" | "employmentRate" | "extraRole"
+    "firstName" | "lastName" | "position" | "employmentRate" | "extraRole" | "experienceLevel" | "educationLevel"
   >>({
     firstName: "",
     lastName: "",
     position: POSITIONS[0],
     employmentRate: EMPLOYMENT_RATES[0],
-    extraRole: "Brak"
+    extraRole: "Brak",
+    experienceLevel: "STANDARD",
+    educationLevel: "BRAK"
   });
   const [generatorRequests, setGeneratorRequests] = useState<TimeOffRequest[]>([]);
   const [generatorForm, setGeneratorForm] = useState<{
     employeeId: string;
     kind: GeneratorRequestKind;
-    startDay: string;
-    endDay: string;
   }>({
     employeeId: "",
-    kind: "vacation",
-    startDay: "",
-    endDay: ""
+    kind: "vacation"
   });
   const [generatorResult, setGeneratorResult] = useState<ScheduleResult | null>(null);
   const [generatorPending, setGeneratorPending] = useState(false);
   const [generatorStatus, setGeneratorStatus] = useState<string>("");
+  const [selectedRequestDays, setSelectedRequestDays] = useState<Set<number>>(new Set());
+  const [monthlyNormInput, setMonthlyNormInput] = useState<WorkTimeNorm>({ hours: 0, minutes: 0 });
 
   useEffect(() => {
     scheduleDirtyRef.current = scheduleDirty;
   }, [scheduleDirty]);
+
+  useEffect(() => {
+    const hours = Math.floor(defaultMonthlyNorm);
+    const minutes = Math.round((defaultMonthlyNorm - hours) * 60);
+    setMonthlyNormInput({ hours, minutes });
+  }, [defaultMonthlyNorm]);
 
   const buildPersistableEntries = useCallback((): ScheduleEntries => {
     const normalized = normalizeScheduleEntries(scheduleEntries);
@@ -283,7 +306,9 @@ export default function AdminDashboardPage() {
             id: docSnap.id,
             ...data,
             extraRole: (data.extraRole as ExtraRoleOption | undefined) ?? "Brak",
-            employmentRate: (data.employmentRate as EmploymentRate | undefined) ?? EMPLOYMENT_RATES[0]
+            employmentRate: (data.employmentRate as EmploymentRate | undefined) ?? EMPLOYMENT_RATES[0],
+            experienceLevel: (data.experienceLevel as ExperienceLevelOption | undefined) ?? "STANDARD",
+            educationLevel: (data.educationLevel as EducationLevelOption | undefined) ?? "BRAK"
           };
         });
         setEmployees(employeeList);
@@ -375,6 +400,11 @@ export default function AdminDashboardPage() {
       const extraRole = mapExtraRole(employee.extraRole, employee.position);
       const fte = mapFte(employee.employmentRate);
       const isEightHour = fte === "1_etat_8h" || extraRole !== "NONE" || baseRole === "SEKRETARKA" || baseRole === "TERAPEUTA" || baseRole === "MAGAZYNIER";
+      const experienceLevel: ExperienceLevel = (employee.experienceLevel as ExperienceLevelOption | undefined) ?? "STANDARD";
+      const educationLevel: EducationLevel =
+        baseRole === "PIELEGNIARKA"
+          ? ((employee.educationLevel as EducationLevelOption | undefined) ?? "BRAK")
+          : "BRAK";
 
       return {
         id: employee.id,
@@ -383,7 +413,9 @@ export default function AdminDashboardPage() {
         baseRole,
         extraRole,
         fteType: fte,
-        canWorkNights: !isEightHour
+        canWorkNights: !isEightHour,
+        experienceLevel,
+        educationLevel
       };
     });
   }, [employees]);
@@ -393,51 +425,38 @@ export default function AdminDashboardPage() {
   };
 
   const handleAddGeneratorRequest = () => {
-    if (!generatorForm.employeeId || !generatorForm.startDay || !generatorForm.endDay) {
-      setGeneratorStatus("Uzupełnij pracownika i zakres dat.");
+    if (!generatorForm.employeeId || selectedRequestDays.size === 0) {
+      setGeneratorStatus("Wybierz pracownika i zaznacz co najmniej jeden dzień na mapie miesiąca.");
       return;
     }
 
-    const parseDay = (value: string) => {
-      const parsed = new Date(value);
-      if (Number.isNaN(parsed.getTime())) return NaN;
-      if (
-        parsed.getFullYear() !== currentMonth.getFullYear() ||
-        parsed.getMonth() !== currentMonth.getMonth()
-      ) {
-        return NaN;
-      }
-      return parsed.getDate();
-    };
-
-    const startDay = parseDay(generatorForm.startDay);
-    const endDay = parseDay(generatorForm.endDay);
-
-    if (Number.isNaN(startDay) || Number.isNaN(endDay)) {
-      setGeneratorStatus("Daty muszą należeć do wybranego miesiąca.");
-      return;
-    }
-
-    if (endDay < startDay) {
-      setGeneratorStatus("Data zakończenia nie może być wcześniejsza niż początek.");
-      return;
-    }
-
-    const newRequest: TimeOffRequest = {
-      id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`,
+    const newRequests: TimeOffRequest[] = Array.from(selectedRequestDays).map((dayNumber) => ({
+      id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${dayNumber}`,
       employeeId: generatorForm.employeeId,
       kind: generatorForm.kind,
-      startDay,
-      endDay
-    };
+      startDay: dayNumber,
+      endDay: dayNumber
+    }));
 
-    setGeneratorRequests((prev) => [...prev, newRequest]);
-    setGeneratorForm((prev) => ({ ...prev, startDay: "", endDay: "" }));
-    setGeneratorStatus("Dodano prośbę / urlop do listy.");
+    setGeneratorRequests((prev) => [...prev, ...newRequests]);
+    setSelectedRequestDays(new Set());
+    setGeneratorStatus("Dodano wybrane dni do listy próśb.");
   };
 
   const handleRemoveGeneratorRequest = (id: string) => {
     setGeneratorRequests((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleToggleRequestDay = (dayNumber: number) => {
+    setSelectedRequestDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(dayNumber)) {
+        next.delete(dayNumber);
+      } else {
+        next.add(dayNumber);
+      }
+      return next;
+    });
   };
 
   const handleGenerateSchedule = () => {
@@ -450,11 +469,16 @@ export default function AdminDashboardPage() {
     setGeneratorStatus("");
 
     try {
+      const sanitizedNorm: WorkTimeNorm = {
+        hours: Number.isFinite(monthlyNormInput.hours) ? Math.max(0, monthlyNormInput.hours) : 0,
+        minutes: Number.isFinite(monthlyNormInput.minutes) ? Math.max(0, monthlyNormInput.minutes % 60) : 0
+      };
       const result = generateSchedule(
         generatorEmployees,
         currentMonth.getFullYear(),
         currentMonth.getMonth(),
-        generatorRequests
+        generatorRequests,
+        { customMonthlyNorm: sanitizedNorm, holidays: generatorHolidaySet }
       );
       setGeneratorResult(result);
       setGeneratorStatus("Wygenerowano grafik na wybrany miesiąc.");
@@ -517,6 +541,8 @@ export default function AdminDashboardPage() {
         position: employeeForm.position,
         employmentRate: employeeForm.employmentRate,
         extraRole: employeeForm.extraRole,
+        experienceLevel: employeeForm.experienceLevel,
+        educationLevel: employeeForm.educationLevel,
         createdAt: serverTimestamp()
       };
 
@@ -601,7 +627,9 @@ export default function AdminDashboardPage() {
       lastName: employee.lastName,
       position: employee.position,
       employmentRate: (employee.employmentRate as EmploymentRate | undefined) ?? EMPLOYMENT_RATES[0],
-      extraRole: (employee.extraRole as ExtraRoleOption | undefined) ?? "Brak"
+      extraRole: (employee.extraRole as ExtraRoleOption | undefined) ?? "Brak",
+      experienceLevel: (employee as Employee).experienceLevel ?? "STANDARD",
+      educationLevel: (employee as Employee).educationLevel ?? "BRAK"
     });
   };
 
@@ -612,7 +640,9 @@ export default function AdminDashboardPage() {
       lastName: "",
       position: POSITIONS[0],
       employmentRate: EMPLOYMENT_RATES[0],
-      extraRole: "Brak"
+      extraRole: "Brak",
+      experienceLevel: "STANDARD",
+      educationLevel: "BRAK"
     });
   };
 
@@ -644,7 +674,9 @@ export default function AdminDashboardPage() {
           lastName: trimmedLast,
           position: editForm.position,
           employmentRate: editForm.employmentRate,
-          extraRole: editForm.extraRole
+          extraRole: editForm.extraRole,
+          experienceLevel: editForm.experienceLevel,
+          educationLevel: editForm.educationLevel
         },
         { merge: true }
       );
@@ -658,7 +690,9 @@ export default function AdminDashboardPage() {
                 lastName: trimmedLast,
                 position: editForm.position,
                 employmentRate: editForm.employmentRate,
-                extraRole: editForm.extraRole
+                extraRole: editForm.extraRole,
+                experienceLevel: editForm.experienceLevel,
+                educationLevel: editForm.educationLevel
               }
             : emp
         )
@@ -1046,6 +1080,38 @@ export default function AdminDashboardPage() {
                         </select>
                       </div>
                       <div className="space-y-1">
+                        <label className="text-xs uppercase tracking-wide text-rose-100">Doświadczenie</label>
+                        <select
+                          value={employeeForm.experienceLevel}
+                          onChange={(e) =>
+                            setEmployeeForm((prev) => ({ ...prev, experienceLevel: e.target.value as ExperienceLevelOption }))
+                          }
+                          className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                        >
+                          {EXPERIENCE_LEVELS.map((level) => (
+                            <option key={level} value={level} className="bg-slate-900">
+                              {level === "NOWY" ? "NOWY / NOWA" : level === "DOSWIADCZONY" ? "DOŚWIADCZONY/A" : "STANDARD"}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs uppercase tracking-wide text-rose-100">Wykształcenie (pielęgniarki)</label>
+                        <select
+                          value={employeeForm.educationLevel}
+                          onChange={(e) =>
+                            setEmployeeForm((prev) => ({ ...prev, educationLevel: e.target.value as EducationLevelOption }))
+                          }
+                          className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                        >
+                          {EDUCATION_LEVELS.map((level) => (
+                            <option key={level} value={level} className="bg-slate-900">
+                              {level}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
                         <label className="text-xs uppercase tracking-wide text-rose-100">Etat</label>
                         <select
                           value={employeeForm.employmentRate}
@@ -1234,6 +1300,36 @@ export default function AdminDashboardPage() {
                     {EXTRA_ROLES.map((roleOption) => (
                       <option key={roleOption} value={roleOption} className="bg-slate-900">
                         {roleOption}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs uppercase tracking-wide text-rose-100">Doświadczenie</label>
+                  <select
+                    value={editForm.experienceLevel}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, experienceLevel: e.target.value as ExperienceLevelOption }))}
+                    disabled={!editingEmployeeId}
+                    className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {EXPERIENCE_LEVELS.map((level) => (
+                      <option key={level} value={level} className="bg-slate-900">
+                        {level === "NOWY" ? "NOWY / NOWA" : level === "DOSWIADCZONY" ? "DOŚWIADCZONY/A" : "STANDARD"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs uppercase tracking-wide text-rose-100">Wykształcenie (pielęgniarki)</label>
+                  <select
+                    value={editForm.educationLevel}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, educationLevel: e.target.value as EducationLevelOption }))}
+                    disabled={!editingEmployeeId}
+                    className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {EDUCATION_LEVELS.map((level) => (
+                      <option key={level} value={level} className="bg-slate-900">
+                        {level}
                       </option>
                     ))}
                   </select>
@@ -1622,32 +1718,36 @@ export default function AdminDashboardPage() {
                       >
                         {option.label}
                       </button>
-                    ))}
+                      ))}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <label className="text-xs uppercase tracking-wide text-sky-200">Od dnia</label>
-                      <input
-                        type="date"
-                        min={monthBounds.min}
-                        max={monthBounds.max}
-                        value={generatorForm.startDay}
-                        onChange={(e) => handleGeneratorFormChange("startDay", e.target.value)}
-                        className="mt-1 w-full rounded-xl border border-sky-200/30 bg-slate-900/80 px-3 py-2 text-sky-50 shadow focus:border-sky-400 focus:outline-none"
-                      />
+                  <div className="mt-3 rounded-2xl border border-sky-200/30 bg-slate-900/60 p-3">
+                    <div className="flex items-center justify-between gap-2 text-xs font-semibold text-sky-100">
+                      <span>Mapa miesiąca</span>
+                      <span className="rounded-full bg-sky-500/20 px-2 py-0.5 text-[10px] text-sky-50">
+                        Zaznaczono {selectedRequestDays.size} dni
+                      </span>
                     </div>
-                    <div>
-                      <label className="text-xs uppercase tracking-wide text-sky-200">Do dnia</label>
-                      <input
-                        type="date"
-                        min={monthBounds.min}
-                        max={monthBounds.max}
-                        value={generatorForm.endDay}
-                        onChange={(e) => handleGeneratorFormChange("endDay", e.target.value)}
-                        className="mt-1 w-full rounded-xl border border-sky-200/30 bg-slate-900/80 px-3 py-2 text-sky-50 shadow focus:border-sky-400 focus:outline-none"
-                      />
+                    <div className="mt-2 grid grid-cols-7 gap-1 text-xs">
+                      {days.map((day) => {
+                        const isSelected = selectedRequestDays.has(day.dayNumber);
+                        const tone = isSelected
+                          ? "bg-emerald-400 text-emerald-950 border-emerald-500"
+                          : getDayCellClasses(day, true);
+                        return (
+                          <button
+                            type="button"
+                            key={`req-${day.dayNumber}`}
+                            onClick={() => handleToggleRequestDay(day.dayNumber)}
+                            className={`flex h-10 flex-col items-center justify-center rounded-lg border text-[10px] font-semibold transition hover:brightness-110 ${tone}`}
+                          >
+                            <span>{day.dayNumber}</span>
+                            <span className="uppercase tracking-wide text-[9px]">{day.label.slice(0, 3)}</span>
+                          </button>
+                        );
+                      })}
                     </div>
+                    <p className="mt-2 text-[11px] text-sky-100/70">Kliknij w dzień, aby dodać lub usunąć zaznaczenie.</p>
                   </div>
 
                   <button
@@ -1703,11 +1803,37 @@ export default function AdminDashboardPage() {
                   <li>• Odpoczynek dobowy: minimum 11h między zmianami.</li>
                   <li>• Odpoczynek tygodniowy: minimum 35h w każdym 7-dniowym oknie.</li>
                   <li>• Maksymalnie 13h pracy w dobie, minimalna długość zmiany 6h.</li>
-                  <li>• Automatyczne liczenie normy miesięcznej na bazie dni roboczych i świąt.</li>
+                  <li>• Automatyczne liczenie normy miesięcznej na bazie dni roboczych i świąt (możesz ją nadpisać).</li>
                   <li>• Minimalne obsady dnia: 3 pielęgniarki, 1 sanitariusz, 2 salowe, maks. 1 opiekun.</li>
                   <li>• Krótsze dyżury (6–11h) tylko gdy brakuje kilku godzin do normy.</li>
                   <li>• Prośby „Preferuje dyżur” zwiększają szansę na przydział w danym dniu.</li>
                 </ul>
+                <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-sky-50">
+                  <div className="space-y-1">
+                    <label className="text-[11px] uppercase tracking-wide text-sky-200">Norma miesięczna – godziny</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={monthlyNormInput.hours}
+                      onChange={(e) => setMonthlyNormInput((prev) => ({ ...prev, hours: Number(e.target.value) }))}
+                      className="w-full rounded-xl border border-sky-200/30 bg-slate-900/80 px-3 py-2 text-sky-50 shadow focus:border-sky-400 focus:outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] uppercase tracking-wide text-sky-200">Norma miesięczna – minuty</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={59}
+                      value={monthlyNormInput.minutes}
+                      onChange={(e) => setMonthlyNormInput((prev) => ({ ...prev, minutes: Number(e.target.value) }))}
+                      className="w-full rounded-xl border border-sky-200/30 bg-slate-900/80 px-3 py-2 text-sky-50 shadow focus:border-sky-400 focus:outline-none"
+                    />
+                  </div>
+                  <p className="col-span-2 text-[11px] text-sky-100/70">
+                    Domyślna wartość wynosi {Math.floor(defaultMonthlyNorm)}h {Math.round((defaultMonthlyNorm % 1) * 60)} min na podstawie kalendarza i świąt.
+                  </p>
+                </div>
                 <div className="mt-4 rounded-xl border border-sky-200/20 bg-slate-900/60 p-3 text-xs text-sky-100/70">
                   <p>Legenda:</p>
                   <p>
@@ -1785,6 +1911,33 @@ export default function AdminDashboardPage() {
                         })}
                       </div>
                     </div>
+                    {generatorResult.dailySummaries.length > 0 && (
+                      <div className="max-h-64 overflow-y-auto rounded-xl border border-sky-200/20 bg-slate-900/50 p-3">
+                        <p className="text-xs uppercase tracking-wide text-sky-200">Podsumowanie dzienne</p>
+                        <div className="mt-2 space-y-2 text-[11px] text-sky-100/80">
+                          {generatorResult.dailySummaries.map((summary) => (
+                            <div key={summary.date} className="rounded-lg border border-sky-200/10 bg-slate-950/60 p-2">
+                              <div className="flex items-center justify-between text-xs font-semibold text-sky-50">
+                                <span>{summary.date}</span>
+                                <span className="rounded-full bg-sky-500/20 px-2 py-0.5 text-[10px] text-sky-50">Dzień/Noc</span>
+                              </div>
+                              <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                                <div className="rounded-md border border-emerald-300/30 bg-emerald-900/30 p-2">
+                                  <p className="text-[10px] font-semibold uppercase text-emerald-100">Dzień</p>
+                                  <p>Pielęgniarki: {summary.dayShift.nurses.total} (nowi: {summary.dayShift.nurses.new}, doświadczone: {summary.dayShift.nurses.experienced})</p>
+                                  <p>Sanitariusze: {summary.dayShift.sanitariusze}, Salowe: {summary.dayShift.salowe}, Opiekunowie: {summary.dayShift.opiekunowie}</p>
+                                </div>
+                                <div className="rounded-md border border-sky-300/30 bg-sky-900/30 p-2">
+                                  <p className="text-[10px] font-semibold uppercase text-sky-100">Noc</p>
+                                  <p>Pielęgniarki: {summary.nightShift.nurses.total} (nowi: {summary.nightShift.nurses.new}, doświadczone: {summary.nightShift.nurses.experienced})</p>
+                                  <p>Sanitariusze: {summary.nightShift.sanitariusze}, Salowe: {summary.nightShift.salowe}, Opiekunowie: {summary.nightShift.opiekunowie}</p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
