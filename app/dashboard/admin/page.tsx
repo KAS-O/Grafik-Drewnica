@@ -39,6 +39,12 @@ import {
   type SimpleEmployee
 } from "../utils";
 import { DaySummaryModal, type DayAssignment } from "../DaySummaryModal";
+import {
+  generateSchedule,
+  type GeneratorEmployee,
+  type ScheduleResult,
+  type TimeOffRequest
+} from "./scheduleGenerator";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +60,8 @@ type Position =
 type EmploymentRate = "1 etat 12h" | "1 etat 8h" | "1/2 etatu" | "3/4 etatu";
 
 type AdminSection = "schedule" | "employees" | "generator";
+
+type GeneratorRequestKind = "vacation" | "unavailable" | "preferDuty";
 
 type Employee = {
   id: string;
@@ -179,8 +187,19 @@ export default function AdminDashboardPage() {
   const monthId = useMemo(() => getMonthKey(currentMonth), [currentMonth]);
   const customHolidaySet = useMemo(() => new Set(customHolidays), [customHolidays]);
   const days: DayCell[] = useMemo(() => buildDays(currentMonth, customHolidaySet), [currentMonth, customHolidaySet]);
+  const monthLabel = useMemo(() => getMonthLabel(currentMonth), [currentMonth]);
+  const monthBounds = useMemo(() => {
+    const year = currentMonth.getFullYear();
+    const month = `${currentMonth.getMonth() + 1}`.padStart(2, "0");
+    const lastDay = `${days.length}`.padStart(2, "0");
+    return {
+      min: `${year}-${month}-01`,
+      max: `${year}-${month}-${lastDay}`
+    };
+  }, [currentMonth, days.length]);
   const groupedEmployees = useMemo(() => groupEmployeesByPosition(employees), [employees]);
   const sortedEmployees = useMemo(() => sortEmployees(employees), [employees]);
+  const employeeMap = useMemo(() => new Map(employees.map((employee) => [employee.id, employee])), [employees]);
   const [deletingEmployeeId, setDeletingEmployeeId] = useState<string | null>(null);
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
@@ -193,6 +212,21 @@ export default function AdminDashboardPage() {
     position: POSITIONS[0],
     employmentRate: EMPLOYMENT_RATES[0]
   });
+  const [generatorRequests, setGeneratorRequests] = useState<TimeOffRequest[]>([]);
+  const [generatorForm, setGeneratorForm] = useState<{
+    employeeId: string;
+    kind: GeneratorRequestKind;
+    startDay: string;
+    endDay: string;
+  }>({
+    employeeId: "",
+    kind: "vacation",
+    startDay: "",
+    endDay: ""
+  });
+  const [generatorResult, setGeneratorResult] = useState<ScheduleResult | null>(null);
+  const [generatorPending, setGeneratorPending] = useState(false);
+  const [generatorStatus, setGeneratorStatus] = useState<string>("");
 
   useEffect(() => {
     scheduleDirtyRef.current = scheduleDirty;
@@ -281,6 +315,146 @@ export default function AdminDashboardPage() {
       next.setMonth(prev.getMonth() + direction);
       return next;
     });
+  };
+
+  useEffect(() => {
+    if (!generatorForm.employeeId && employees[0]) {
+      setGeneratorForm((prev) => ({ ...prev, employeeId: employees[0].id }));
+    }
+  }, [employees, generatorForm.employeeId]);
+
+  const generatorEmployees = useMemo<GeneratorEmployee[]>(() => {
+    const mapRole = (position: string): GeneratorEmployee["role"] => {
+      const normalized = (position || "").toLowerCase();
+      if (normalized.includes("sanitariusz")) return "sanitariusz";
+      if (normalized.includes("salow")) return "salowa";
+      if (normalized.includes("opiekun")) return "opiekun";
+      return "pielegniarka";
+    };
+
+    const mapFte = (employmentRate?: string): GeneratorEmployee["fteType"] => {
+      switch (employmentRate) {
+        case "1 etat 8h":
+          return "1_etat_8h";
+        case "1/2 etatu":
+          return "0_5_etatu";
+        case "3/4 etatu":
+          return "0_75_etatu";
+        default:
+          return "1_etat_12h";
+      }
+    };
+
+    return employees.map((employee) => ({
+      id: employee.id,
+      firstName: employee.firstName,
+      lastName: employee.lastName,
+      role: mapRole(employee.position),
+      fteType: mapFte(employee.employmentRate),
+      canWorkNights: mapFte(employee.employmentRate) !== "1_etat_8h"
+    }));
+  }, [employees]);
+
+  const handleGeneratorFormChange = (key: keyof typeof generatorForm, value: string) => {
+    setGeneratorForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleAddGeneratorRequest = () => {
+    if (!generatorForm.employeeId || !generatorForm.startDay || !generatorForm.endDay) {
+      setGeneratorStatus("Uzupełnij pracownika i zakres dat.");
+      return;
+    }
+
+    const parseDay = (value: string) => {
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return NaN;
+      if (
+        parsed.getFullYear() !== currentMonth.getFullYear() ||
+        parsed.getMonth() !== currentMonth.getMonth()
+      ) {
+        return NaN;
+      }
+      return parsed.getDate();
+    };
+
+    const startDay = parseDay(generatorForm.startDay);
+    const endDay = parseDay(generatorForm.endDay);
+
+    if (Number.isNaN(startDay) || Number.isNaN(endDay)) {
+      setGeneratorStatus("Daty muszą należeć do wybranego miesiąca.");
+      return;
+    }
+
+    if (endDay < startDay) {
+      setGeneratorStatus("Data zakończenia nie może być wcześniejsza niż początek.");
+      return;
+    }
+
+    const newRequest: TimeOffRequest = {
+      id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`,
+      employeeId: generatorForm.employeeId,
+      kind: generatorForm.kind,
+      startDay,
+      endDay
+    };
+
+    setGeneratorRequests((prev) => [...prev, newRequest]);
+    setGeneratorForm((prev) => ({ ...prev, startDay: "", endDay: "" }));
+    setGeneratorStatus("Dodano prośbę / urlop do listy.");
+  };
+
+  const handleRemoveGeneratorRequest = (id: string) => {
+    setGeneratorRequests((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleGenerateSchedule = () => {
+    if (!generatorEmployees.length) {
+      setGeneratorStatus("Brak pracowników do ułożenia grafiku.");
+      return;
+    }
+
+    setGeneratorPending(true);
+    setGeneratorStatus("");
+
+    try {
+      const result = generateSchedule(
+        generatorEmployees,
+        currentMonth.getFullYear(),
+        currentMonth.getMonth(),
+        generatorRequests
+      );
+      setGeneratorResult(result);
+      setGeneratorStatus("Wygenerowano grafik na wybrany miesiąc.");
+    } catch (error) {
+      console.error(error);
+      setGeneratorStatus("Nie udało się wygenerować grafiku.");
+    } finally {
+      setGeneratorPending(false);
+    }
+  };
+
+  const handleApplyGenerated = () => {
+    if (!generatorResult) return;
+
+    setScheduleEntries((prev) => {
+      const merged = mergeEntriesWithEmployees(prev, employees);
+      const updated: ScheduleEntries = { ...merged };
+
+      Object.entries(generatorResult.schedule).forEach(([employeeId, shifts]) => {
+        const entry = updated[employeeId] || { fullName: "", position: "", shifts: {} };
+        updated[employeeId] = {
+          fullName: entry.fullName,
+          position: entry.position,
+          shifts: { ...entry.shifts, ...shifts }
+        };
+      });
+
+      return updated;
+    });
+
+    setScheduleDirty(true);
+    scheduleDirtyRef.current = true;
+    setStatus({ type: "success", text: "Wstawiono wygenerowany grafik do edytora." });
   };
 
   const handleAddEmployee = async (e: FormEvent<HTMLFormElement>) => {
@@ -1310,10 +1484,320 @@ export default function AdminDashboardPage() {
 
         {activeSection === "generator" && (
           <section className="rounded-3xl border border-sky-200/30 bg-slate-900/50 p-5 shadow-inner">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Generator grafików</h2>
-            <p className="mt-2 text-sm text-sky-100/80">
-              Sekcja w przygotowaniu. Wkrótce pojawi się tutaj generator automatycznych grafików.
-            </p>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Generator grafików</h2>
+                <p className="mt-1 text-sm text-sky-100/80">
+                  Wybierz miesiąc, dodaj urlopy i prośby dyżurowe, a następnie wygeneruj grafik zgodny z normami.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 rounded-full bg-slate-800/80 px-2 py-1 text-sm font-semibold text-sky-50 shadow">
+                <button
+                  onClick={() => handleMonthChange(-1)}
+                  className="rounded-full bg-slate-700 px-3 py-1 text-xs uppercase tracking-wide transition hover:bg-slate-600"
+                >
+                  Poprzedni
+                </button>
+                <span className="px-3 py-1 text-sm">{monthLabel}</span>
+                <button
+                  onClick={() => handleMonthChange(1)}
+                  className="rounded-full bg-slate-700 px-3 py-1 text-xs uppercase tracking-wide transition hover:bg-slate-600"
+                >
+                  Następny
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-3">
+              <div className="rounded-2xl border border-sky-200/20 bg-slate-950/50 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-sky-300/80">Urlopy i prośby</p>
+                    <h3 className="text-lg font-semibold text-sky-50">Ograniczenia pracowników</h3>
+                  </div>
+                  <span className="rounded-full bg-sky-500/20 px-3 py-1 text-xs font-semibold text-sky-100">{generatorRequests.length} pozycji</span>
+                </div>
+
+                <div className="mt-3 space-y-3 text-sm text-sky-50">
+                  <label className="block text-xs uppercase tracking-wide text-sky-200">Pracownik</label>
+                  <select
+                    value={generatorForm.employeeId}
+                    onChange={(e) => handleGeneratorFormChange("employeeId", e.target.value)}
+                    className="w-full rounded-xl border border-sky-200/30 bg-slate-900/80 px-3 py-2 text-sky-50 shadow focus:border-sky-400 focus:outline-none"
+                  >
+                    {!employees.length && <option value="">Brak pracowników</option>}
+                    {sortedEmployees.map((employee) => (
+                      <option key={employee.id} value={employee.id}>
+                        {employee.firstName} {employee.lastName} — {employee.position}
+                      </option>
+                    ))}
+                  </select>
+
+                  <label className="block text-xs uppercase tracking-wide text-sky-200">Typ prośby</label>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    {(
+                      [
+                        { key: "vacation", label: "Urlop" },
+                        { key: "unavailable", label: "Nieobecność" },
+                        { key: "preferDuty", label: "Preferuje dyżur" }
+                      ] satisfies { key: GeneratorRequestKind; label: string }[]
+                    ).map((option) => (
+                      <button
+                        key={option.key}
+                        onClick={() => handleGeneratorFormChange("kind", option.key)}
+                        className={`rounded-xl border px-3 py-2 font-semibold transition ${
+                          generatorForm.kind === option.key
+                            ? "border-sky-400 bg-sky-500/20 text-sky-50"
+                            : "border-sky-200/30 bg-slate-800/60 text-sky-100/80 hover:border-sky-300/40"
+                        }`}
+                        type="button"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <label className="text-xs uppercase tracking-wide text-sky-200">Od dnia</label>
+                      <input
+                        type="date"
+                        min={monthBounds.min}
+                        max={monthBounds.max}
+                        value={generatorForm.startDay}
+                        onChange={(e) => handleGeneratorFormChange("startDay", e.target.value)}
+                        className="mt-1 w-full rounded-xl border border-sky-200/30 bg-slate-900/80 px-3 py-2 text-sky-50 shadow focus:border-sky-400 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs uppercase tracking-wide text-sky-200">Do dnia</label>
+                      <input
+                        type="date"
+                        min={monthBounds.min}
+                        max={monthBounds.max}
+                        value={generatorForm.endDay}
+                        onChange={(e) => handleGeneratorFormChange("endDay", e.target.value)}
+                        className="mt-1 w-full rounded-xl border border-sky-200/30 bg-slate-900/80 px-3 py-2 text-sky-50 shadow focus:border-sky-400 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleAddGeneratorRequest}
+                    className="w-full rounded-full bg-gradient-to-r from-sky-500 via-sky-400 to-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow transition hover:brightness-110 disabled:opacity-60"
+                  >
+                    Dodaj do listy
+                  </button>
+
+                  <div className="space-y-2">
+                    {generatorRequests.length === 0 && (
+                      <p className="text-xs text-sky-200/70">Brak dodanych urlopów ani próśb.</p>
+                    )}
+                    {generatorRequests.map((item) => {
+                      const employee = employeeMap.get(item.employeeId);
+                      const label =
+                        item.kind === "vacation"
+                          ? "Urlop"
+                          : item.kind === "unavailable"
+                            ? "Nieobecność"
+                            : "Preferuje dyżur";
+                      return (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between rounded-xl border border-sky-200/20 bg-slate-800/70 px-3 py-2 text-xs"
+                        >
+                          <div>
+                            <p className="font-semibold text-sky-50">
+                              {employee?.firstName} {employee?.lastName}
+                            </p>
+                            <p className="text-sky-100/80">
+                              {label}: {item.startDay}–{item.endDay}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleRemoveGeneratorRequest(item.id)}
+                            className="rounded-full bg-rose-600/60 px-3 py-1 text-[11px] font-semibold text-rose-50 transition hover:bg-rose-500"
+                          >
+                            Usuń
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-sky-200/20 bg-slate-950/60 p-4">
+                <p className="text-[10px] uppercase tracking-[0.2em] text-sky-300/80">Założenia</p>
+                <h3 className="text-lg font-semibold text-sky-50">Parametry generatora</h3>
+                <ul className="mt-3 space-y-2 text-sm text-sky-100/80">
+                  <li>• Odpoczynek dobowy: minimum 11h między zmianami.</li>
+                  <li>• Odpoczynek tygodniowy: minimum 35h w każdym 7-dniowym oknie.</li>
+                  <li>• Maksymalnie 13h pracy w dobie, minimalna długość zmiany 6h.</li>
+                  <li>• Automatyczne liczenie normy miesięcznej na bazie dni roboczych i świąt.</li>
+                  <li>• Minimalne obsady dnia: 3 pielęgniarki, 1 sanitariusz, 2 salowe, maks. 1 opiekun.</li>
+                  <li>• Krótsze dyżury (6–11h) tylko gdy brakuje kilku godzin do normy.</li>
+                  <li>• Prośby „Preferuje dyżur” zwiększają szansę na przydział w danym dniu.</li>
+                </ul>
+                <div className="mt-4 rounded-xl border border-sky-200/20 bg-slate-900/60 p-3 text-xs text-sky-100/70">
+                  <p>Legenda:</p>
+                  <p>
+                    <span className="font-semibold">D</span> – dyżur dzienny 12h, <span className="font-semibold">N</span> – dyżur nocny 12h,
+                    <span className="font-semibold"> 1</span> – etat 8h, liczba 6–11 – krótszy dyżur dzienny.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-sky-200/20 bg-slate-950/50 p-4">
+                <p className="text-[10px] uppercase tracking-[0.2em] text-sky-300/80">Generowanie</p>
+                <h3 className="text-lg font-semibold text-sky-50">Uruchom generator</h3>
+
+                <div className="mt-3 flex flex-col gap-2">
+                  <button
+                    onClick={handleGenerateSchedule}
+                    disabled={generatorPending || !employees.length}
+                    className="rounded-full bg-gradient-to-r from-emerald-400 via-sky-400 to-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 shadow transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {generatorPending ? "Generowanie..." : "Generuj grafik"}
+                  </button>
+                  <button
+                    onClick={handleApplyGenerated}
+                    disabled={!generatorResult}
+                    className="rounded-full border border-sky-200/30 bg-slate-800/70 px-4 py-2 text-sm font-semibold text-sky-50 shadow transition hover:border-sky-200/60 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Wstaw do edytora grafiku
+                  </button>
+                  {generatorStatus && <p className="text-xs text-sky-100/80">{generatorStatus}</p>}
+                </div>
+
+                {generatorResult && (
+                  <div className="mt-4 space-y-3 text-sm text-sky-100/80">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-sky-200">Ostrzeżenia</p>
+                      {generatorResult.warnings.length === 0 ? (
+                        <p className="text-emerald-200">Brak ostrzeżeń – grafiki spełniają założenia.</p>
+                      ) : (
+                        <ul className="mt-1 list-disc space-y-1 pl-5 text-amber-200">
+                          {generatorResult.warnings.map((warning, index) => (
+                            <li key={index}>{warning}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-sky-200">Podsumowanie godzin</p>
+                      <div className="divide-y divide-slate-700 rounded-xl border border-sky-200/20 bg-slate-900/60 text-xs">
+                        {sortedEmployees.map((employee) => {
+                          const summary = generatorResult.hoursSummary[employee.id];
+                          if (!summary) return null;
+                          const diff = Math.round(summary.difference * 10) / 10;
+                          return (
+                            <div key={employee.id} className="flex items-center justify-between px-3 py-2">
+                              <div className="flex flex-col">
+                                <span className="font-semibold text-sky-50">
+                                  {employee.firstName} {employee.lastName}
+                                </span>
+                                <span className="text-[11px] text-sky-200/80">{employee.position}</span>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-semibold text-sky-50">{summary.workedHours}h</p>
+                                <p className="text-[11px] text-sky-200/70">
+                                  Cel: {summary.targetHours}h, różnica: {diff > 0 ? "+" : ""}
+                                  {diff}h
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-sky-200/20 bg-slate-950/60 p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-sky-300/80">Podgląd grafiku</p>
+                  <h3 className="text-lg font-semibold text-sky-50">Automatycznie ułożony miesiąc</h3>
+                  <p className="text-xs text-sky-100/70">Kliknij „Wstaw do edytora”, aby zapisać go w tabeli powyżej.</p>
+                </div>
+                <div className="rounded-full bg-slate-800/70 px-3 py-1 text-xs font-semibold text-sky-100 shadow">
+                  {days.length} dni / {sortedEmployees.length} pracowników
+                </div>
+              </div>
+
+              <div className="mt-3 overflow-x-auto rounded-2xl border border-sky-200/20 bg-slate-900/60 shadow-inner">
+                <table className="min-w-full border-collapse text-xs">
+                  <thead>
+                    <tr>
+                      <th className="sticky left-0 z-10 bg-slate-900/80 px-3 py-2 text-left font-semibold text-sky-200">
+                        Pracownik
+                      </th>
+                      {days.map((day) => (
+                        <th
+                          key={day.dayNumber}
+                          className={`border-b border-slate-800 px-2 py-2 text-center font-semibold ${getDayCellClasses(day)}`}
+                        >
+                          <div className="flex flex-col text-[10px] leading-tight text-sky-50">
+                            <span>{day.dayNumber}</span>
+                            <span className="uppercase tracking-wide text-[9px]">{day.label.slice(0, 3)}</span>
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedEmployees.map((employee) => {
+                      const entry = generatorResult?.schedule[employee.id] || {};
+                      const theme = getPositionTheme(employee.position || "");
+                      return (
+                        <tr key={employee.id} className={`${theme.rowBg} ${theme.rowBorder} border-b border-slate-800/40`}>
+                          <td className="sticky left-0 z-10 bg-slate-900/80 px-3 py-2 text-left text-sky-50">
+                            <div className="flex items-center gap-2">
+                              <span className={`h-2 w-2 rounded-full ${theme.accentDot}`}></span>
+                              <div>
+                                <p className="text-sm font-semibold leading-tight">
+                                  {employee.firstName} {employee.lastName}
+                                </p>
+                                <p className="text-[10px] uppercase tracking-wide text-sky-200/80">{employee.position}</p>
+                              </div>
+                            </div>
+                          </td>
+                          {days.map((day) => {
+                            const value = entry[day.dayNumber] || "";
+                            const badges = extractShiftBadges(value);
+                            const tone = deriveShiftTone(value);
+                            return (
+                              <td key={`${employee.id}-${day.dayNumber}`} className="px-1 py-1 text-center">
+                                <div
+                                  className={`relative flex h-10 items-center justify-center gap-1 rounded-lg border text-[11px] font-semibold ${tone}`}
+                                >
+                                  {badges.base || "-"}
+                                  {badges.hasO && <span className="rounded-sm bg-emerald-400 px-1 text-[9px] font-bold text-emerald-950">O</span>}
+                                  {badges.hasR && <span className="rounded-sm bg-sky-300 px-1 text-[9px] font-bold text-sky-950">R</span>}
+                                  {badges.hasK && <span className="rounded-sm bg-red-400 px-1 text-[9px] font-bold text-red-950">K</span>}
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {!sortedEmployees.length && (
+                  <p className="px-4 py-6 text-center text-sm text-sky-100/70">Brak pracowników do wyświetlenia.</p>
+                )}
+                {sortedEmployees.length > 0 && !generatorResult && (
+                  <p className="px-4 py-4 text-center text-xs text-sky-100/70">
+                    Uruchom generator, aby zobaczyć automatyczny grafik dla tego miesiąca.
+                  </p>
+                )}
+              </div>
+            </div>
           </section>
         )}
       </div>
