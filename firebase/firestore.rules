@@ -30,7 +30,15 @@ service cloud.firestore {
 
     function isValidSchedulePayload(monthId) {
       return request.resource != null &&
-        request.resource.data.keys().hasOnly(["month", "entries", "customHolidays", "updatedAt"]) &&
+        request.resource.data.keys().hasAll(["month", "entries", "customHolidays"]) &&
+        request.resource.data.keys().hasOnly([
+          "month",
+          "entries",
+          "customHolidays",
+          "updatedAt",
+          "createdAt",
+          "updatedBy"
+        ]) &&
         request.resource.data.month == monthId &&
         request.resource.data.entries is map &&
         request.resource.data.customHolidays is list;
@@ -57,7 +65,7 @@ service cloud.firestore {
 
     match /schedules/{monthId} {
       allow read: if isSignedIn();
-      allow create, update: if isAdmin() && isValidSchedulePayload(monthId);
+      allow create, update: if isSignedIn() && isValidSchedulePayload(monthId);
       allow delete: if isAdmin();
     }
 
