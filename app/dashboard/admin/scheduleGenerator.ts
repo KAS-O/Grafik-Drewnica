@@ -147,7 +147,7 @@ const DEFAULT_STAFF_REQUIREMENTS: StaffRequirements = {
       headNurse: 1,
       zabiegowa: 1,
       nurses: { min: 2, max: 4, regularOnly: true },
-      sanitariusz: { min: 1, max: 1 },
+      sanitariusz: { min: 1, max: 2 },
       salowa: { min: 2, max: 2 },
       opiekun: { min: 0, max: 1 },
       magazynier: { min: 1, max: 1 },
@@ -170,7 +170,7 @@ const DEFAULT_STAFF_REQUIREMENTS: StaffRequirements = {
       headNurse: 0,
       zabiegowa: 0,
       nurses: { min: 2, max: 3, regularOnly: true },
-      sanitariusz: { min: 1, max: 1 },
+      sanitariusz: { min: 1, max: 2 },
       salowa: { min: 2, max: 2 },
       opiekun: { min: 0, max: 1 },
       magazynier: { min: 0, max: 0 },
@@ -193,7 +193,7 @@ const DEFAULT_STAFF_REQUIREMENTS: StaffRequirements = {
       headNurse: 0,
       zabiegowa: 0,
       nurses: { min: 2, max: 3, regularOnly: true },
-      sanitariusz: { min: 1, max: 1 },
+      sanitariusz: { min: 1, max: 2 },
       salowa: { min: 2, max: 2 },
       opiekun: { min: 0, max: 1 },
       magazynier: { min: 0, max: 0 },
@@ -224,10 +224,27 @@ const DEFAULT_CONFIG = {
   customMonthlyNorm: null as WorkTimeNorm | null
 };
 
-function shuffleArray<T>(items: T[]): T[] {
+type RandomFn = () => number;
+
+type GeneratorOptions = Partial<typeof DEFAULT_CONFIG> & {
+  previousSchedule?: Record<string, Record<number, string>>;
+  randomSeed?: number;
+};
+
+function createSeededRandom(seed: number): RandomFn {
+  let state = seed | 0;
+
+  return () => {
+    state = Math.imul(state ^ (state >>> 15), 1 | state);
+    state ^= state + Math.imul(state ^ (state >>> 7), 61 | state);
+    return ((state ^ (state >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffleArray<T>(items: T[], random: RandomFn = Math.random): T[] {
   const copy = [...items];
   for (let i = copy.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(random() * (i + 1));
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
   return copy;
@@ -346,6 +363,27 @@ function hasDailyRestConflict(previousShift: string | undefined, nextShift: stri
   return false;
 }
 
+function getConsecutiveDayShiftCount(
+  schedule: Record<string, Record<number, string>>,
+  employeeId: string,
+  day: number
+): number {
+  let count = 0;
+
+  for (let offset = 1; offset <= 3; offset++) {
+    const value = schedule[employeeId]?.[day - offset];
+    if (!value) break;
+    const { base } = parseShift(value);
+    if (base === "D") {
+      count += 1;
+    } else {
+      break;
+    }
+  }
+
+  return count;
+}
+
 function ensureWeeklyRest(schedule: Record<number, string>, totalDays: number): boolean {
   for (let start = 1; start <= totalDays - 6; start++) {
     let worked = 0;
@@ -391,7 +429,12 @@ function formatDate(year: number, monthIndex: number, day: number) {
 function isEightHourWorker(employee: GeneratorEmployee) {
   if (employee.extraRole === "ODDZIALOWA" || employee.extraRole === "ZABIEGOWA") return true;
   if (employee.fteType === "1_etat_8h") return true;
-  if (employee.baseRole === "SEKRETARKA" || employee.baseRole === "TERAPEUTKA" || employee.baseRole === "MAGAZYNIERKA") {
+  if (
+    employee.baseRole === "SEKRETARKA" ||
+    employee.baseRole === "TERAPEUTKA" ||
+    employee.baseRole === "MAGAZYNIERKA" ||
+    employee.baseRole === "OPIEKUN"
+  ) {
     return true;
   }
   return false;
@@ -456,7 +499,7 @@ function isFullShift(value: string) {
 }
 
 function isFixedScheduleEmployee(employee: GeneratorEmployee) {
-  const fixedBaseRoles: BaseRole[] = ["MAGAZYNIERKA", "SEKRETARKA", "TERAPEUTKA"];
+  const fixedBaseRoles: BaseRole[] = ["MAGAZYNIERKA", "SEKRETARKA", "TERAPEUTKA", "OPIEKUN"];
   const fixedExtraRoles: ExtraRole[] = ["ODDZIALOWA", "ZABIEGOWA"];
   return fixedBaseRoles.includes(employee.baseRole) || fixedExtraRoles.includes(employee.extraRole ?? "NONE");
 }
@@ -474,13 +517,19 @@ function selectCandidate(
   dayType: DayType,
   targets: Record<string, number>,
   scoreFn?: (emp: GeneratorEmployee) => number,
-  canAssign?: (emp: GeneratorEmployee) => boolean
+  canAssign?: (emp: GeneratorEmployee) => boolean,
+  random: RandomFn = Math.random
 ) {
-  const shuffled = shuffleArray(candidates);
+  const shuffled = shuffleArray(candidates, random);
   const prioritized = shuffled.sort((a, b) => {
     const prefersA = preferDays.get(a.id)?.has(day) ? -1 : 0;
     const prefersB = preferDays.get(b.id)?.has(day) ? -1 : 0;
     if (prefersA !== prefersB) return prefersA - prefersB;
+    if (shiftValue === "D") {
+      const streakA = getConsecutiveDayShiftCount(schedule, a.id, day);
+      const streakB = getConsecutiveDayShiftCount(schedule, b.id, day);
+      if (streakA !== streakB) return streakA - streakB;
+    }
     if (scoreFn) {
       const diff = (scoreFn(b) ?? 0) - (scoreFn(a) ?? 0);
       if (diff !== 0) return diff;
@@ -488,11 +537,20 @@ function selectCandidate(
     const hoursA = workedHoursForEmployee(schedule, a.id);
     const hoursB = workedHoursForEmployee(schedule, b.id);
     if (hoursA !== hoursB) return hoursA - hoursB;
+    if (shiftValue === "D") {
+      const streakA = getConsecutiveDayShiftCount(schedule, a.id, day);
+      const streakB = getConsecutiveDayShiftCount(schedule, b.id, day);
+      if (streakA !== streakB) return streakA - streakB;
+    }
+    if (Math.abs(hoursA - hoursB) < 0.1) {
+      return random() - 0.5;
+    }
     return a.lastName.localeCompare(b.lastName, "pl");
   });
 
   return prioritized.find((candidate) => {
     if (shiftValue === "N" && candidate.canWorkNights === false) return false;
+    if (shiftValue === "D" && getConsecutiveDayShiftCount(schedule, candidate.id, day) >= 3) return false;
     const employeeSchedule = schedule[candidate.id] || {};
     if (employeeSchedule[day]) return false;
     if (isEightHourWorker(candidate) && dayType !== "WEEKDAY") return false;
@@ -508,14 +566,16 @@ function selectCandidate(
   });
 }
 
-export function generateSchedule(
+function generateScheduleOnce(
   employees: GeneratorEmployee[],
   year: number,
   monthIndex: number,
   requests: TimeOffRequest[] = [],
-  config: Partial<typeof DEFAULT_CONFIG> = {}
+  config: GeneratorOptions = {},
+  random: RandomFn = Math.random
 ): ScheduleResult {
-  const mergedConfig = { ...DEFAULT_CONFIG, ...config };
+  const { previousSchedule: _unusedPrev, randomSeed: _unusedSeed, ...coreConfig } = config;
+  const mergedConfig = { ...DEFAULT_CONFIG, ...coreConfig };
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
   const schedule: Record<string, Record<number, string>> = {};
   const warnings: WarningEntry[] = [];
@@ -541,7 +601,7 @@ export function generateSchedule(
   const eightHourWorkers = employees.filter((employee) => isEightHourWorker(employee));
   const shiftWorkers = employees.filter((employee) => !isEightHourWorker(employee));
 
-  const dayOrder = shuffleArray(Array.from({ length: daysInMonth }, (_, idx) => idx + 1));
+  const dayOrder = shuffleArray(Array.from({ length: daysInMonth }, (_, idx) => idx + 1), random);
 
   for (const day of dayOrder) {
     const dayType = getDayType(year, monthIndex, day, holidays);
@@ -593,7 +653,7 @@ export function generateSchedule(
       );
 
       const tryAssignHead = (candidates: GeneratorEmployee[]) => {
-        for (const candidate of shuffleArray(candidates)) {
+        for (const candidate of shuffleArray(candidates, random)) {
           if (tryAssign(candidate, "1")) {
             headNurseByDay[day] = candidate.id;
             return true;
@@ -627,7 +687,18 @@ export function generateSchedule(
       let zabCount = alreadyZab ? 1 : 0;
       const zabiegowePool = eightHourWorkers.filter((e) => e.extraRole === "ZABIEGOWA" && !dayBlocked.has(e.id));
       while (zabCount < requirement.zabiegowa) {
-        const candidate = selectCandidate(zabiegowePool, schedule, day, "1", preferDays, dayType, targets);
+        const candidate = selectCandidate(
+          zabiegowePool,
+          schedule,
+          day,
+          "1",
+          preferDays,
+          dayType,
+          targets,
+          undefined,
+          undefined,
+          random
+        );
         if (!candidate) break;
         if (schedule[candidate.id]?.[day]) {
           zabCount += 1;
@@ -659,7 +730,8 @@ export function generateSchedule(
               !dayBlocked.has(employee.id) &&
               !schedule[employee.id][day] &&
               (!predicate || predicate(employee))
-          )
+          ),
+          random
         );
         let assigned = employees.filter(
           (emp) => emp.baseRole === baseRole && schedule[emp.id]?.[day] === "1" && (!predicate || predicate(emp))
@@ -753,7 +825,8 @@ export function generateSchedule(
             }
           }
           return true;
-        }
+        },
+        random
       );
 
     while (countedDayNurses() < minNurses) {
@@ -806,7 +879,9 @@ export function generateSchedule(
           preferDays,
           dayType,
           targets,
-          getSeniorityScore
+          getSeniorityScore,
+          undefined,
+          random
         );
         if (!candidate) break;
         if (schedule[candidate.id]?.[day]) {
@@ -876,7 +951,8 @@ export function generateSchedule(
             if (!experiencedLeft && assignedNightNurses.every((n) => n.experienceLevel !== "DOSWIADCZONY")) return false;
           }
           return true;
-        }
+        },
+        random
       );
 
     while (countedNightNurses() < nightRequirement.nurses.min) {
@@ -937,7 +1013,8 @@ export function generateSchedule(
           if (assignedSupport.find((item) => item.id === emp.id)) return false;
           if (predicate && !predicate(emp)) return false;
           return true;
-        }
+        },
+        random
       );
 
     if (supportNeeded > 0) {
@@ -989,6 +1066,41 @@ export function generateSchedule(
     }
   }
 
+  // Allow occasional second sanitariusz on day shift to close hour deficits
+  const sanitariusze = employees.filter((employee) => employee.baseRole === "SANITARIUSZ");
+  sanitariusze.forEach((employee) => {
+    if (!isNormTracked(employee)) return;
+    let workedHours = workedHoursForEmployee(schedule, employee.id);
+    let deficit = targets[employee.id] - workedHours;
+    if (deficit < mergedConfig.minShiftLength) return;
+
+    const candidateDays = shuffleArray(Array.from({ length: daysInMonth }, (_, idx) => idx + 1), random);
+    for (const day of candidateDays) {
+      if (deficit < mergedConfig.minShiftLength) break;
+      const employeeSchedule = schedule[employee.id];
+      if (employeeSchedule[day]) continue;
+      const dayType = getDayType(year, monthIndex, day, holidays);
+      const dayRequirement = mergedConfig.staffRequirements[dayType].DAY;
+      const blocked = blockedDays.get(employee.id)?.has(day);
+      if (blocked) continue;
+      if (hasDailyRestConflict(employeeSchedule[day - 1], "D")) continue;
+      if (getConsecutiveDayShiftCount(schedule, employee.id, day) >= 3) continue;
+
+      const daySanitCount = employees.filter((emp) => {
+        if (emp.baseRole !== "SANITARIUSZ") return false;
+        const shift = schedule[emp.id]?.[day];
+        return parseShift(shift || "").base === "D";
+      }).length;
+      if (daySanitCount >= (dayRequirement.sanitariusz.max ?? Infinity)) continue;
+
+      const projected = workedHours + getHoursForShift("D");
+      if (projected - targets[employee.id] > 0.1) continue;
+      employeeSchedule[day] = "D";
+      workedHours = projected;
+      deficit = targets[employee.id] - workedHours;
+    }
+  });
+
   // Short shifts to close gaps
   employees.forEach((employee) => {
     if (!isNormTracked(employee)) return;
@@ -997,7 +1109,7 @@ export function generateSchedule(
     const workedHours = workedHoursForEmployee(schedule, employee.id);
     const deficit = target - workedHours;
     if (deficit >= mergedConfig.minShiftLength) {
-      const dayCandidates = shuffleArray(Array.from({ length: daysInMonth }, (_, idx) => idx + 1));
+      const dayCandidates = shuffleArray(Array.from({ length: daysInMonth }, (_, idx) => idx + 1), random);
       for (const day of dayCandidates) {
         if (employeeSchedule[day]) continue;
         const dayType = getDayType(year, monthIndex, day, holidays);
@@ -1184,14 +1296,14 @@ export function generateSchedule(
       const sorted = [...list].sort((a, b) => getSeniorityScore(b.employee) - getSeniorityScore(a.employee));
       sorted.forEach((entry, index) => {
         const extra = index === 0 ? "O" : "R";
-        if (shiftLabel === "DAY" && dayCoordinator && entry.employee.id === dayCoordinator.employee.id) {
+        const isCoordinator =
+          (shiftLabel === "DAY" && dayCoordinator && entry.employee.id === dayCoordinator.employee.id) ||
+          (shiftLabel === "NIGHT" && nightCoordinator && entry.employee.id === nightCoordinator.employee.id);
+        if (isCoordinator) {
           markShiftExtra(schedule, entry.employee.id, day, "O");
           return;
         }
-        if (shiftLabel === "NIGHT" && nightCoordinator && entry.employee.id === nightCoordinator.employee.id) {
-          markShiftExtra(schedule, entry.employee.id, day, "O");
-          return;
-        }
+        if (entry.employee.extraRole === "ODDZIALOWA" || entry.employee.extraRole === "ZABIEGOWA") return;
         markShiftExtra(schedule, entry.employee.id, day, extra);
       });
     };
@@ -1227,10 +1339,6 @@ export function generateSchedule(
     });
 
     const nightOpiekunowie = nightAssignments.filter((item) => item.employee.baseRole === "OPIEKUN");
-    nightOpiekunowie.forEach((item, idx) => {
-      const extra = nightSanitariusze.length > 0 && idx === 0 ? "R" : "O";
-      markShiftExtra(schedule, item.employee.id, day, extra);
-    });
 
     const counters = {
       pielegniarka: dayNurses.length,
@@ -1452,4 +1560,82 @@ export function generateSchedule(
   }
 
   return { schedule, headNurseByDay, hoursSummary, warnings, dailySummaries };
+}
+
+function calculateSimilarity(
+  current: Record<string, Record<number, string>>,
+  previous?: Record<string, Record<number, string>>
+) {
+  if (!previous) return 0;
+  let matches = 0;
+  let total = 0;
+
+  Object.entries(current).forEach(([employeeId, shifts]) => {
+    const previousShifts = previous[employeeId] || {};
+    Object.entries(shifts).forEach(([dayKey, value]) => {
+      total += 1;
+      if (previousShifts[Number(dayKey)] === value) {
+        matches += 1;
+      }
+    });
+  });
+
+  if (total === 0) return 0;
+  return matches / total;
+}
+
+function scoreSchedule(result: ScheduleResult, previousSchedule?: Record<string, Record<number, string>>) {
+  const warningPenalty = result.warnings.length * 15;
+  const hourPenalty = Object.values(result.hoursSummary).reduce((sum, entry) => sum + Math.abs(entry.difference), 0);
+  const similarityPenalty = calculateSimilarity(result.schedule, previousSchedule) * 50;
+  const coverageScore = result.dailySummaries.reduce((sum, summary) => sum + summary.dayShift.nurses.total, 0);
+
+  return coverageScore - warningPenalty - hourPenalty - similarityPenalty;
+}
+
+export async function generateSchedule(
+  employees: GeneratorEmployee[],
+  year: number,
+  monthIndex: number,
+  requests: TimeOffRequest[] = [],
+  config: GeneratorOptions = {}
+): Promise<ScheduleResult> {
+  const { previousSchedule, randomSeed, ...coreConfig } = config;
+  const nowFn = typeof performance !== "undefined" && performance.now ? () => performance.now() : () => Date.now();
+  const start = nowFn();
+  const minDuration = 10_000;
+  const maxDuration = 60_000;
+  const baseSeed = randomSeed ?? Math.floor(start + Math.random() * 10_000);
+  let iteration = 0;
+  let best: ScheduleResult | null = null;
+  let bestScore = -Infinity;
+
+  while (nowFn() - start < maxDuration) {
+    const seed = baseSeed + iteration * 977 + Math.floor(Math.random() * 5000);
+    const rng = createSeededRandom(seed);
+    const candidate = generateScheduleOnce(employees, year, monthIndex, requests, coreConfig, rng);
+    const score = scoreSchedule(candidate, previousSchedule);
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+
+    iteration += 1;
+    if (nowFn() - start >= minDuration && iteration > 12 && bestScore > -Infinity) break;
+    if (iteration % 3 === 0) {
+      // Yield to the event loop to keep the UI responsive during long computations
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+
+  const elapsed = nowFn() - start;
+  const remaining = Math.max(0, minDuration - elapsed);
+  if (remaining > 0) {
+    await new Promise((resolve) => setTimeout(resolve, remaining));
+  }
+
+  if (best) return best;
+  return generateScheduleOnce(employees, year, monthIndex, requests, coreConfig, createSeededRandom(baseSeed + 131));
 }
