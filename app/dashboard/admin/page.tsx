@@ -187,6 +187,26 @@ export default function AdminDashboardPage() {
     scheduleDirtyRef.current = scheduleDirty;
   }, [scheduleDirty]);
 
+  const buildPersistableEntries = useCallback((): ScheduleEntries => {
+    const normalized = normalizeScheduleEntries(scheduleEntries);
+    const merged = mergeEntriesWithEmployees(normalized, employees);
+    const prepared: ScheduleEntries = {};
+
+    Object.entries(merged).forEach(([employeeId, entry]) => {
+      prepared[employeeId] = {
+        fullName: (entry.fullName || "").trim(),
+        position: entry.position || "",
+        shifts: Object.fromEntries(
+          Object.entries(entry.shifts || {}).map(([dayKey, value]) => [Number(dayKey), String(value || "")]).filter(([_, v]) =>
+            Boolean(v)
+          )
+        )
+      };
+    });
+
+    return prepared;
+  }, [employees, scheduleEntries]);
+
   const loadData = useCallback(
     async ({ preserveStatus, skipIfDirty }: { preserveStatus?: boolean; skipIfDirty?: boolean } = {}) => {
       if (!user || !isAdmin) return;
@@ -570,23 +590,25 @@ export default function AdminDashboardPage() {
     setScheduleSaving(true);
 
     try {
-      const sanitizedEntries = mergeEntriesWithEmployees(normalizeScheduleEntries(scheduleEntries), employees);
+      const sanitizedEntries = buildPersistableEntries();
+      const uniqueHolidays = Array.from(new Set(customHolidays)).sort((a, b) => a - b);
 
       await setDoc(
         doc(db, "schedules", monthId),
         {
           month: monthId,
           entries: sanitizedEntries,
-          customHolidays,
+          customHolidays: uniqueHolidays,
           updatedAt: serverTimestamp()
         },
         { merge: true }
       );
 
       setScheduleEntries(sanitizedEntries);
+      setCustomHolidays(uniqueHolidays);
       setScheduleDirty(false);
       setStatus({ type: "success", text: "Grafik zapisany." });
-      await loadData({ preserveStatus: true });
+      await loadData({ preserveStatus: true, skipIfDirty: true });
     } catch (error) {
       console.error("Nie udało się zapisać grafiku:", error);
       setStatus({ type: "error", text: "Nie udało się zapisać grafiku." });
@@ -911,7 +933,7 @@ export default function AdminDashboardPage() {
           </form>
         </section>
 
-        <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <section className="grid gap-6 overflow-x-hidden lg:grid-cols-[1.1fr_0.9fr]">
           <div className="glass-panel rounded-3xl border border-sky-200/20 bg-slate-900/60 p-5 md:p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-col gap-1">
@@ -1056,7 +1078,7 @@ export default function AdminDashboardPage() {
               <p className="text-sm font-semibold text-sky-50">{getMonthLabel(currentMonth)}</p>
             </div>
 
-            <div className="relative w-full overflow-hidden rounded-2xl border border-sky-200/30">
+            <div className="relative w-full overflow-x-hidden rounded-2xl border border-sky-200/30">
               <div className="w-full overflow-x-auto overscroll-x-contain">
                 <table className="min-w-[1200px] text-[11px] text-sky-50">
                   <thead className="bg-slate-900/60">

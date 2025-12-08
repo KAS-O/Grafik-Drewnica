@@ -11,19 +11,27 @@ service cloud.firestore {
         : null;
     }
 
-    function isAdmin() {
+    function hasAdminClaim() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    function hasAdminRole() {
       let record = userDoc();
       let roleValue = record != null && record.exists() && record.data.role is string
         ? lower(record.data.role)
         : "";
 
-      return isSignedIn() && (request.auth.token.admin == true || roleValue == "administrator");
+      return roleValue == "administrator" || roleValue == "admin";
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (hasAdminClaim() || hasAdminRole());
     }
 
     match /users/{userId} {
-      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
       allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSignedIn() && (request.auth.uid == userId || isAdmin());
     }
 
     match /employees/{employeeId} {
