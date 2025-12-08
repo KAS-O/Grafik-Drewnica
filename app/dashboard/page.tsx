@@ -148,7 +148,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-950 px-3 py-6 text-sky-50">
+    <main className="min-h-screen overflow-x-hidden bg-slate-950 px-3 py-6 text-sky-50">
       <div className="mx-auto w-full max-w-[1600px]">
         <div className="flex w-full flex-col gap-6">
         <header className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-sky-200/20 bg-slate-900/60 p-4 shadow-lg">
