@@ -18,6 +18,8 @@ import {
   type DayCell
 } from "./utils";
 
+export const dynamic = "force-dynamic";
+
 type Employee = {
   id: string;
   firstName: string;
