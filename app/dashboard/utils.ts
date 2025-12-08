@@ -14,7 +14,10 @@ export const POSITION_ORDER = [
   "Pielęgniarka / Pielęgniarz",
   "Opiekun Medyczny",
   "Sanitariusz",
-  "Salowa"
+  "Salowa",
+  "Magazynierka",
+  "Sekretarka",
+  "Terapeuta zajęciowy"
 ];
 
 export type DayCell = {
@@ -213,6 +216,45 @@ export function getPositionTheme(position: string) {
       accentBorder: "border-l-4 border-l-orange-200/70",
       rowBg: "bg-orange-950/40",
       rowBorder: "border-orange-200/30"
+    };
+  }
+
+  if (normalized.includes("magazynier")) {
+    return {
+      containerBg: "bg-emerald-950/40",
+      containerBorder: "border-emerald-200/40",
+      labelText: "text-emerald-50",
+      labelPill: "bg-emerald-300/20 text-emerald-100",
+      accentDot: "bg-emerald-200",
+      accentBorder: "border-l-4 border-l-emerald-200/70",
+      rowBg: "bg-emerald-950/30",
+      rowBorder: "border-emerald-200/30"
+    };
+  }
+
+  if (normalized.includes("sekret")) {
+    return {
+      containerBg: "bg-fuchsia-900/30",
+      containerBorder: "border-fuchsia-200/40",
+      labelText: "text-fuchsia-50",
+      labelPill: "bg-fuchsia-300/20 text-fuchsia-100",
+      accentDot: "bg-fuchsia-200",
+      accentBorder: "border-l-4 border-l-fuchsia-200/70",
+      rowBg: "bg-fuchsia-950/40",
+      rowBorder: "border-fuchsia-200/30"
+    };
+  }
+
+  if (normalized.includes("terapeuta") || normalized.includes("zajęciow")) {
+    return {
+      containerBg: "bg-teal-900/30",
+      containerBorder: "border-teal-200/40",
+      labelText: "text-teal-50",
+      labelPill: "bg-teal-300/20 text-teal-100",
+      accentDot: "bg-teal-200",
+      accentBorder: "border-l-4 border-l-teal-200/70",
+      rowBg: "bg-teal-950/40",
+      rowBorder: "border-teal-200/30"
     };
   }
 

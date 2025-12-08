@@ -55,6 +55,9 @@ type Position =
   | "Opiekun Medyczny"
   | "Sanitariusz"
   | "Salowa"
+  | "Magazynierka"
+  | "Sekretarka"
+  | "Terapeuta zajęciowy"
   | string;
 
 type EmploymentRate = "1 etat 12h" | "1 etat 8h" | "1/2 etatu" | "3/4 etatu";
@@ -94,7 +97,10 @@ const POSITIONS = [
   "Pielęgniarka / Pielęgniarz",
   "Opiekun Medyczny",
   "Sanitariusz",
-  "Salowa"
+  "Salowa",
+  "Magazynierka",
+  "Sekretarka",
+  "Terapeuta zajęciowy"
 ];
 
 const EMPLOYMENT_RATES: EmploymentRate[] = ["1 etat 12h", "1 etat 8h", "1/2 etatu", "3/4 etatu"];
@@ -326,6 +332,9 @@ export default function AdminDashboardPage() {
   const generatorEmployees = useMemo<GeneratorEmployee[]>(() => {
     const mapRole = (position: string): GeneratorEmployee["role"] => {
       const normalized = (position || "").toLowerCase();
+      if (normalized.includes("magazynier")) return "magazynierka";
+      if (normalized.includes("sekret")) return "sekretarka";
+      if (normalized.includes("terapeuta") && normalized.includes("zaj")) return "terapeuta_zajeciowy";
       if (normalized.includes("sanitariusz")) return "sanitariusz";
       if (normalized.includes("salow")) return "salowa";
       if (normalized.includes("opiekun")) return "opiekun";

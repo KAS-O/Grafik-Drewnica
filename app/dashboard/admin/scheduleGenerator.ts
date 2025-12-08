@@ -1,6 +1,13 @@
 import { POLISH_HOLIDAYS } from "../utils";
 
-export type Role = "pielegniarka" | "sanitariusz" | "salowa" | "opiekun";
+export type Role =
+  | "pielegniarka"
+  | "sanitariusz"
+  | "salowa"
+  | "opiekun"
+  | "magazynierka"
+  | "sekretarka"
+  | "terapeuta_zajeciowy";
 
 export type FteType = "1_etat_12h" | "1_etat_8h" | "0_5_etatu" | "0_75_etatu";
 
@@ -40,12 +47,18 @@ export type StaffRequirements = {
     sanitariusz: number;
     salowa: number;
     opiekun: { min: number; max: number };
+    magazynierka: number;
+    sekretarka: number;
+    terapeuta_zajeciowy: number;
   };
   nightShift: {
     pielegniarka: number;
     sanitariusz: number;
     salowa: number;
     opiekun: { min: number; max: number };
+    magazynierka: number;
+    sekretarka: number;
+    terapeuta_zajeciowy: number;
   };
 };
 
@@ -60,13 +73,19 @@ const DEFAULT_CONFIG = {
       pielegniarka: 3,
       sanitariusz: 1,
       salowa: 2,
-      opiekun: { min: 0, max: 1 }
+      opiekun: { min: 0, max: 1 },
+      magazynierka: 0,
+      sekretarka: 0,
+      terapeuta_zajeciowy: 0
     },
     nightShift: {
       pielegniarka: 1,
       sanitariusz: 0,
       salowa: 0,
-      opiekun: { min: 0, max: 1 }
+      opiekun: { min: 0, max: 1 },
+      magazynierka: 0,
+      sekretarka: 0,
+      terapeuta_zajeciowy: 0
     }
   } satisfies StaffRequirements,
   holidays: POLISH_HOLIDAYS
@@ -243,7 +262,10 @@ export function generateSchedule(
       pielegniarka: pool.filter((e) => e.role === "pielegniarka"),
       sanitariusz: pool.filter((e) => e.role === "sanitariusz"),
       salowa: pool.filter((e) => e.role === "salowa"),
-      opiekun: pool.filter((e) => e.role === "opiekun")
+      opiekun: pool.filter((e) => e.role === "opiekun"),
+      magazynierka: pool.filter((e) => e.role === "magazynierka"),
+      sekretarka: pool.filter((e) => e.role === "sekretarka"),
+      terapeuta_zajeciowy: pool.filter((e) => e.role === "terapeuta_zajeciowy")
     };
 
     const dayAssignments: GeneratorEmployee[] = [];
@@ -279,6 +301,9 @@ export function generateSchedule(
     fillRole("salowa", requirement.salowa);
     fillRole("pielegniarka", requirement.pielegniarka);
     fillRole("opiekun", requirement.opiekun.min, requirement.opiekun.max);
+    fillRole("magazynierka", requirement.magazynierka);
+    fillRole("sekretarka", requirement.sekretarka);
+    fillRole("terapeuta_zajeciowy", requirement.terapeuta_zajeciowy);
 
     // Night shift rotation (optional but helps norm)
     const nightPool = pool.filter((employee) => employee.canWorkNights !== false);
@@ -331,7 +356,15 @@ export function generateSchedule(
 
   // Staffing validation
   for (let day = 1; day <= daysInMonth; day++) {
-    const counters = { pielegniarka: 0, sanitariusz: 0, salowa: 0, opiekun: 0 };
+    const counters = {
+      pielegniarka: 0,
+      sanitariusz: 0,
+      salowa: 0,
+      opiekun: 0,
+      magazynierka: 0,
+      sekretarka: 0,
+      terapeuta_zajeciowy: 0
+    };
     employees.forEach((employee) => {
       const shift = schedule[employee.id]?.[day];
       if (!shift) return;
@@ -354,6 +387,15 @@ export function generateSchedule(
       counters.opiekun > mergedConfig.staffRequirements.dayShift.opiekun.max
     ) {
       warnings.push(`Dzień ${day}: liczba opiekunów medycznych poza dozwolonym zakresem.`);
+    }
+    if (counters.magazynierka < mergedConfig.staffRequirements.dayShift.magazynierka) {
+      warnings.push(`Dzień ${day}: za mało magazynierek na dziennej zmianie.`);
+    }
+    if (counters.sekretarka < mergedConfig.staffRequirements.dayShift.sekretarka) {
+      warnings.push(`Dzień ${day}: za mało sekretarek na dziennej zmianie.`);
+    }
+    if (counters.terapeuta_zajeciowy < mergedConfig.staffRequirements.dayShift.terapeuta_zajeciowy) {
+      warnings.push(`Dzień ${day}: za mało terapeutów zajęciowych na dziennej zmianie.`);
     }
   }
 
