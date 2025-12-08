@@ -44,6 +44,8 @@ export type TimeOffRequest = {
 export type DayType = "WEEKDAY" | "WEEKEND" | "HOLIDAY";
 export type ShiftType = "DAY" | "NIGHT";
 
+type ShiftSegment = "FULL" | "RA" | "PO";
+
 export type WarningCode =
   | "MISSING_ROLE"
   | "INSUFFICIENT_STAFF"
@@ -224,6 +226,9 @@ const DEFAULT_CONFIG = {
   customMonthlyNorm: null as WorkTimeNorm | null
 };
 
+const EXEMPT_BASE_ROLES: BaseRole[] = ["MAGAZYNIERKA", "SEKRETARKA", "TERAPEUTKA"];
+const EXEMPT_EXTRA_ROLES: ExtraRole[] = ["ODDZIALOWA", "ZABIEGOWA"];
+
 type RandomFn = () => number;
 
 type GeneratorOptions = Partial<typeof DEFAULT_CONFIG> & {
@@ -251,9 +256,10 @@ function shuffleArray<T>(items: T[], random: RandomFn = Math.random): T[] {
 }
 
 type ShiftInterval = { start: number; end: number };
+type ParsedShift = { base: string; extras: Set<string>; segment: ShiftSegment };
 
 function getShiftIntervals(value: string): ShiftInterval[] {
-  const { base } = parseShift(value);
+  const { base, segment } = parseShift(value);
   const normalize = base.trim().toLowerCase();
 
   if (!normalize) return [];
@@ -265,8 +271,9 @@ function getShiftIntervals(value: string): ShiftInterval[] {
   if (numericMatch) {
     const length = Number.parseInt(numericMatch[1], 10);
     const suffix = numericMatch[2];
+    const isAfternoon = segment === "PO" || suffix === "p";
     let start = 7;
-    if (suffix === "p") {
+    if (isAfternoon) {
       start = length >= 10 ? 19 : 13;
     }
     return [{ start, end: start + length }];
@@ -277,7 +284,11 @@ function getShiftIntervals(value: string): ShiftInterval[] {
     const hours = Number.parseInt(durationMatch[1], 10);
     const minutes = durationMatch[3] ? Number.parseInt(durationMatch[3], 10) : 0;
     const length = hours + minutes / 60;
-    return [{ start: 7, end: 7 + length }];
+    let start = 7;
+    if (segment === "PO") {
+      start = length >= 10 ? 19 : 13;
+    }
+    return [{ start, end: start + length }];
   }
 
   return [];
@@ -355,14 +366,6 @@ export function setMonthlyNorm(norm: WorkTimeNorm) {
   return norm;
 }
 
-function hasDailyRestConflict(previousShift: string | undefined, nextShift: string): boolean {
-  if (!previousShift) return false;
-  if (previousShift === "N" && nextShift !== "N") {
-    return true;
-  }
-  return false;
-}
-
 function getConsecutiveDayShiftCount(
   schedule: Record<string, Record<number, string>>,
   employeeId: string,
@@ -384,14 +387,220 @@ function getConsecutiveDayShiftCount(
   return count;
 }
 
-function ensureWeeklyRest(schedule: Record<number, string>, totalDays: number): boolean {
-  for (let start = 1; start <= totalDays - 6; start++) {
-    let worked = 0;
-    for (let offset = 0; offset < 7; offset++) {
-      if (schedule[start + offset]) worked += 1;
-    }
-    if (worked === 7) return false;
+function toAbsoluteIntervals(day: number, value: string): ShiftInterval[] {
+  const baseDayStart = (day - 1) * 24;
+  return getShiftIntervals(value).map((interval) => ({
+    start: baseDayStart + interval.start,
+    end: baseDayStart + interval.end
+  }));
+}
+
+function collectEmployeeIntervals(schedule: Record<string, Record<number, string>>, employeeId: string) {
+  const entries = schedule[employeeId] || {};
+  return Object.entries(entries)
+    .flatMap(([dayKey, value]) => toAbsoluteIntervals(Number(dayKey), value))
+    .sort((a, b) => a.start - b.start);
+}
+
+function hasOverlap(intervals: ShiftInterval[]) {
+  for (let i = 1; i < intervals.length; i++) {
+    if (intervals[i - 1].end > intervals[i].start) return true;
   }
+  return false;
+}
+
+function violatesRestBreak(intervals: ShiftInterval[], minRestHours: number) {
+  for (let i = 1; i < intervals.length; i++) {
+    if (intervals[i].start - intervals[i - 1].end < minRestHours) return true;
+  }
+  return false;
+}
+
+function exceedsDailyLimit(intervals: ShiftInterval[], maxHours: number) {
+  const checkpoints = Array.from(
+    new Set(intervals.flatMap((interval) => [interval.start, interval.end]))
+  ).sort((a, b) => a - b);
+
+  for (const point of checkpoints) {
+    const windowEnd = point + 24;
+    const worked = intervals.reduce((sum, interval) => {
+      const start = Math.max(interval.start, point);
+      const end = Math.min(interval.end, windowEnd);
+      return end > start ? sum + (end - start) : sum;
+    }, 0);
+    if (worked - maxHours > 1e-6) return true;
+  }
+
+  return false;
+}
+
+function getOccupiedDays(schedule: Record<number, string>, totalDays: number): boolean[] {
+  const busy: boolean[] = Array.from({ length: totalDays }, () => false);
+  Object.entries(schedule).forEach(([dayKey, value]) => {
+    const day = Number(dayKey);
+    toAbsoluteIntervals(day, value).forEach((interval) => {
+      for (let offset = 0; offset < totalDays; offset++) {
+        const windowStart = offset * 24;
+        const windowEnd = windowStart + 24;
+        if (interval.start < windowEnd && interval.end > windowStart) {
+          busy[offset] = true;
+        }
+      }
+    });
+  });
+  return busy;
+}
+
+function ensureWeeklyRest(schedule: Record<number, string>, totalDays: number): boolean {
+  const busyDays = getOccupiedDays(schedule, totalDays);
+  for (let start = 0; start <= totalDays - 7; start++) {
+    let hasRest = false;
+    for (let offset = 0; offset < 6; offset++) {
+      if (!busyDays[start + offset] && !busyDays[start + offset + 1]) {
+        hasRest = true;
+        break;
+      }
+    }
+    if (!hasRest) return false;
+  }
+  return true;
+}
+
+function isAlertSuppressed(employee: GeneratorEmployee) {
+  return (
+    EXEMPT_BASE_ROLES.includes(employee.baseRole) ||
+    EXEMPT_EXTRA_ROLES.includes(employee.extraRole ?? "NONE")
+  );
+}
+
+function wouldExceedStaffLimit(
+  schedule: Record<string, Record<number, string>>,
+  employees: GeneratorEmployee[],
+  day: number,
+  value: string,
+  employee: GeneratorEmployee,
+  dayType: DayType,
+  requirements: StaffRequirements
+) {
+  const intervals = getShiftIntervals(value);
+  const dayAssignments = employees
+    .map((emp) => ({ employee: emp, shift: schedule[emp.id]?.[day] }))
+    .filter((item): item is { employee: GeneratorEmployee; shift: string } => Boolean(item.shift))
+    .map((item) => ({ ...item, intervals: getShiftIntervals(item.shift) }));
+
+  const daySegments = [{ start: 7, end: 19 }];
+  const nightSegments = [{ start: 19, end: 31 }];
+  const { DAY: dayReq, NIGHT: nightReq } = requirements[dayType];
+
+  const overlapsDay = daySegments.some((segment) => isActiveInSegment(intervals, segment.start, segment.end));
+  const overlapsNight = nightSegments.some((segment) => isActiveInSegment(intervals, segment.start, segment.end));
+
+  const checkLimit = (
+    max: number | undefined,
+    predicate: (emp: GeneratorEmployee) => boolean,
+    segments: { start: number; end: number }[]
+  ) => {
+    if (max === undefined) return false;
+    const currentCount = dayAssignments.filter(
+      (item) => predicate(item.employee) && segments.some((segment) => isActiveInSegment(item.intervals, segment.start, segment.end))
+    ).length;
+    const incoming = predicate(employee) && segments.some((segment) => isActiveInSegment(intervals, segment.start, segment.end));
+    return currentCount + (incoming ? 1 : 0) > max;
+  };
+
+  if (employee.baseRole === "PIELEGNIARKA") {
+    if (
+      overlapsDay &&
+      checkLimit(
+        dayReq.nurses.max,
+        (emp) => emp.baseRole === "PIELEGNIARKA" && (!dayReq.nurses.regularOnly || (emp.extraRole ?? "NONE") === "NONE"),
+        daySegments
+      )
+    ) {
+      return true;
+    }
+    if (
+      overlapsNight &&
+      checkLimit(
+        nightReq.nurses.max,
+        (emp) => emp.baseRole === "PIELEGNIARKA" && (!nightReq.nurses.regularOnly || (emp.extraRole ?? "NONE") === "NONE"),
+        nightSegments
+      )
+    ) {
+      return true;
+    }
+  }
+
+  if (employee.baseRole === "SANITARIUSZ") {
+    if (overlapsDay && checkLimit(dayReq.sanitariusz.max, (emp) => emp.baseRole === "SANITARIUSZ", daySegments)) return true;
+    if (overlapsNight && checkLimit(nightReq.sanitariusz.max, (emp) => emp.baseRole === "SANITARIUSZ", nightSegments)) return true;
+  }
+
+  if (employee.baseRole === "SALOWA") {
+    if (overlapsDay && checkLimit(dayReq.salowa.max, (emp) => emp.baseRole === "SALOWA", daySegments)) return true;
+    if (overlapsNight && checkLimit(nightReq.salowa.max, (emp) => emp.baseRole === "SALOWA", nightSegments)) return true;
+  }
+
+  if (employee.baseRole === "OPIEKUN") {
+    if (overlapsDay && checkLimit(dayReq.opiekun.max, (emp) => emp.baseRole === "OPIEKUN", daySegments)) return true;
+    if (overlapsNight && checkLimit(nightReq.opiekun?.max, (emp) => emp.baseRole === "OPIEKUN", nightSegments)) return true;
+  }
+
+  if (employee.baseRole === "MAGAZYNIERKA") {
+    if (overlapsDay && checkLimit(dayReq.magazynier?.max, (emp) => emp.baseRole === "MAGAZYNIERKA", daySegments)) return true;
+  }
+
+  if (employee.baseRole === "SEKRETARKA") {
+    if (overlapsDay && checkLimit(dayReq.sekretarka?.max, (emp) => emp.baseRole === "SEKRETARKA", daySegments)) return true;
+  }
+
+  if (employee.baseRole === "TERAPEUTKA") {
+    if (overlapsDay && checkLimit(dayReq.terapeuta?.max, (emp) => emp.baseRole === "TERAPEUTKA", daySegments)) return true;
+  }
+
+  return false;
+}
+
+function canAssignEmployeeToShift(
+  schedule: Record<string, Record<number, string>>,
+  employees: GeneratorEmployee[],
+  employee: GeneratorEmployee,
+  day: number,
+  shiftValue: string,
+  dayType: DayType,
+  requirements: StaffRequirements,
+  config: typeof DEFAULT_CONFIG,
+  totalDays: number
+) {
+  const employeeSchedule = schedule[employee.id];
+  if (employeeSchedule[day]) return false;
+
+  const { base } = parseShift(shiftValue);
+  const normalizedBase = base.toUpperCase();
+  const prevShift = employeeSchedule[day - 1];
+  const nextShift = employeeSchedule[day + 1];
+
+  if (normalizedBase === "N") {
+    if (prevShift && parseShift(prevShift).base.toUpperCase() === "N") return false;
+    if (nextShift && parseShift(nextShift).base.toUpperCase() === "N") return false;
+  }
+
+  if (normalizedBase === "D" && getConsecutiveDayShiftCount(schedule, employee.id, day) >= 3) return false;
+
+  if (wouldExceedStaffLimit(schedule, employees, day, shiftValue, employee, dayType, requirements)) return false;
+
+  const currentIntervals = collectEmployeeIntervals(schedule, employee.id);
+  const proposalIntervals = [...currentIntervals, ...toAbsoluteIntervals(day, shiftValue)].sort(
+    (a, b) => a.start - b.start
+  );
+
+  if (hasOverlap(proposalIntervals)) return false;
+  if (violatesRestBreak(proposalIntervals, config.minRestHoursDaily)) return false;
+  if (exceedsDailyLimit(proposalIntervals, config.maxDailyHours)) return false;
+
+  const simulated = { ...employeeSchedule, [day]: shiftValue };
+  if (!ensureWeeklyRest(simulated, totalDays)) return false;
+
   return true;
 }
 
@@ -475,15 +684,19 @@ function getSeniorityScore(employee: GeneratorEmployee) {
   return educationScore * 10 + experienceScore;
 }
 
-function parseShift(value: string) {
+function parseShift(value: string): ParsedShift {
   const [base, ...rest] = value.split(" ").filter(Boolean);
   const extras = new Set(rest.map((item) => item.trim().toUpperCase()));
-  return { base: base || "", extras };
+  const segment: ShiftSegment = extras.has("RA") ? "RA" : extras.has("PO") ? "PO" : "FULL";
+  return { base: base || "", extras, segment };
 }
 
 function formatShift(base: string, extras: Set<string>) {
+  const segments: string[] = [];
+  if (extras.has("RA")) segments.push("RA");
+  if (extras.has("PO")) segments.push("PO");
   const orderedExtras = ["O", "R", "K"].filter((mark) => extras.has(mark));
-  return [base, ...orderedExtras].filter(Boolean).join(" ").trim();
+  return [base, ...segments, ...orderedExtras].filter(Boolean).join(" ").trim();
 }
 
 function markShiftExtra(schedule: Record<string, Record<number, string>>, employeeId: string, day: number, extra: "O" | "R" | "K") {
@@ -499,9 +712,10 @@ function isFullShift(value: string) {
 }
 
 function isFixedScheduleEmployee(employee: GeneratorEmployee) {
-  const fixedBaseRoles: BaseRole[] = ["MAGAZYNIERKA", "SEKRETARKA", "TERAPEUTKA", "OPIEKUN"];
-  const fixedExtraRoles: ExtraRole[] = ["ODDZIALOWA", "ZABIEGOWA"];
-  return fixedBaseRoles.includes(employee.baseRole) || fixedExtraRoles.includes(employee.extraRole ?? "NONE");
+  return (
+    EXEMPT_BASE_ROLES.includes(employee.baseRole) ||
+    EXEMPT_EXTRA_ROLES.includes(employee.extraRole ?? "NONE")
+  );
 }
 
 function isNormTracked(employee: GeneratorEmployee) {
@@ -516,6 +730,10 @@ function selectCandidate(
   preferDays: Map<string, Set<number>>,
   dayType: DayType,
   targets: Record<string, number>,
+  employees: GeneratorEmployee[],
+  requirements: StaffRequirements,
+  config: typeof DEFAULT_CONFIG,
+  totalDays: number,
   scoreFn?: (emp: GeneratorEmployee) => number,
   canAssign?: (emp: GeneratorEmployee) => boolean,
   random: RandomFn = Math.random
@@ -550,12 +768,22 @@ function selectCandidate(
 
   return prioritized.find((candidate) => {
     if (shiftValue === "N" && candidate.canWorkNights === false) return false;
-    if (shiftValue === "D" && getConsecutiveDayShiftCount(schedule, candidate.id, day) >= 3) return false;
-    const employeeSchedule = schedule[candidate.id] || {};
-    if (employeeSchedule[day]) return false;
     if (isEightHourWorker(candidate) && dayType !== "WEEKDAY") return false;
-    const previousShift = employeeSchedule[day - 1];
-    if (hasDailyRestConflict(previousShift, shiftValue)) return false;
+    if (
+      !canAssignEmployeeToShift(
+        schedule,
+        employees,
+        candidate,
+        day,
+        shiftValue,
+        dayType,
+        requirements,
+        config,
+        totalDays
+      )
+    ) {
+      return false;
+    }
     const worked = workedHoursForEmployee(schedule, candidate.id);
     if (isNormTracked(candidate)) {
       const nextHours = worked + getHoursForShift(shiftValue);
@@ -619,12 +847,24 @@ function generateScheduleOnce(
 
     const tryAssign = (employee: GeneratorEmployee, value: string) => {
       if (dayBlocked.has(employee.id)) return false;
-      const employeeSchedule = schedule[employee.id];
-      if (employeeSchedule[day]) return false;
       if (isEightHourWorker(employee) && !isWeekday) return false;
       const worked = workedHoursForEmployee(schedule, employee.id);
       if (isNormTracked(employee) && worked + getHoursForShift(value) - targets[employee.id] > 0.1) return false;
-      if (hasDailyRestConflict(employeeSchedule[day - 1], value)) return false;
+      if (
+        !canAssignEmployeeToShift(
+          schedule,
+          employees,
+          employee,
+          day,
+          value,
+          dayType,
+          mergedConfig.staffRequirements,
+          mergedConfig,
+          daysInMonth
+        )
+      ) {
+        return false;
+      }
       assignShift(employee, value);
       return true;
     };
@@ -695,6 +935,10 @@ function generateScheduleOnce(
           preferDays,
           dayType,
           targets,
+          employees,
+          mergedConfig.staffRequirements,
+          mergedConfig,
+          daysInMonth,
           undefined,
           undefined,
           random
@@ -808,6 +1052,10 @@ function generateScheduleOnce(
         preferDays,
         dayType,
         targets,
+        employees,
+        mergedConfig.staffRequirements,
+        mergedConfig,
+        daysInMonth,
         getSeniorityScore,
         (emp) => {
           if (assignedDayNurses.find((item) => item.id === emp.id)) return false;
@@ -879,6 +1127,10 @@ function generateScheduleOnce(
           preferDays,
           dayType,
           targets,
+          employees,
+          mergedConfig.staffRequirements,
+          mergedConfig,
+          daysInMonth,
           getSeniorityScore,
           undefined,
           random
@@ -891,7 +1143,10 @@ function generateScheduleOnce(
         assignShift(candidate, "D");
         if (candidate.experienceLevel !== "NOWY") assigned += 1;
       }
-      if (assigned < needed) {
+      const suppressAlerts =
+        baseRole === "MAGAZYNIERKA" || baseRole === "SEKRETARKA" || baseRole === "TERAPEUTKA";
+
+      if (assigned < needed && !suppressAlerts) {
         warnings.push({
           date: formatDate(year, monthIndex, day),
           shift: "DAY",
@@ -901,7 +1156,7 @@ function generateScheduleOnce(
           description: `${formatDate(year, monthIndex, day)} (dzień): brak wymaganej obsady dla roli ${baseRole.toLowerCase()} (brakuje ${needed - assigned}).`
         });
       }
-      if (assigned > max) {
+      if (assigned > max && !suppressAlerts) {
         warnings.push({
           date: formatDate(year, monthIndex, day),
           shift: "DAY",
@@ -937,6 +1192,10 @@ function generateScheduleOnce(
         preferDays,
         dayType,
         targets,
+        employees,
+        mergedConfig.staffRequirements,
+        mergedConfig,
+        daysInMonth,
         getSeniorityScore,
         (emp) => {
           if (assignedNightNurses.find((item) => item.id === emp.id)) return false;
@@ -1008,6 +1267,10 @@ function generateScheduleOnce(
         preferDays,
         dayType,
         targets,
+        employees,
+        mergedConfig.staffRequirements,
+        mergedConfig,
+        daysInMonth,
         getSeniorityScore,
         (emp) => {
           if (assignedSupport.find((item) => item.id === emp.id)) return false;
@@ -1083,8 +1346,21 @@ function generateScheduleOnce(
       const dayRequirement = mergedConfig.staffRequirements[dayType].DAY;
       const blocked = blockedDays.get(employee.id)?.has(day);
       if (blocked) continue;
-      if (hasDailyRestConflict(employeeSchedule[day - 1], "D")) continue;
-      if (getConsecutiveDayShiftCount(schedule, employee.id, day) >= 3) continue;
+      if (
+        !canAssignEmployeeToShift(
+          schedule,
+          employees,
+          employee,
+          day,
+          "D",
+          dayType,
+          mergedConfig.staffRequirements,
+          mergedConfig,
+          daysInMonth
+        )
+      ) {
+        continue;
+      }
 
       const daySanitCount = employees.filter((emp) => {
         if (emp.baseRole !== "SANITARIUSZ") return false;
@@ -1106,22 +1382,42 @@ function generateScheduleOnce(
     if (!isNormTracked(employee)) return;
     const target = targets[employee.id];
     const employeeSchedule = schedule[employee.id];
-    const workedHours = workedHoursForEmployee(schedule, employee.id);
-    const deficit = target - workedHours;
-    if (deficit >= mergedConfig.minShiftLength) {
-      const dayCandidates = shuffleArray(Array.from({ length: daysInMonth }, (_, idx) => idx + 1), random);
-      for (const day of dayCandidates) {
-        if (employeeSchedule[day]) continue;
-        const dayType = getDayType(year, monthIndex, day, holidays);
-        if (isEightHourWorker(employee) && dayType !== "WEEKDAY") continue;
-        if (blockedDays.get(employee.id)?.has(day)) continue;
-        const prevShift = employeeSchedule[day - 1];
-        if (hasDailyRestConflict(prevShift, `${mergedConfig.minShiftLength}`)) continue;
-        const length = Math.min(deficit, 11);
-        if (length < mergedConfig.minShiftLength) break;
-        employeeSchedule[day] = `${length}h`;
-        break;
-      }
+    let workedHours = workedHoursForEmployee(schedule, employee.id);
+    let deficit = target - workedHours;
+    if (deficit < mergedConfig.minShiftLength) return;
+
+    const dayCandidates = shuffleArray(Array.from({ length: daysInMonth }, (_, idx) => idx + 1), random);
+    for (const day of dayCandidates) {
+      if (deficit < mergedConfig.minShiftLength) break;
+      if (employeeSchedule[day]) continue;
+      const dayType = getDayType(year, monthIndex, day, holidays);
+      if (isEightHourWorker(employee) && dayType !== "WEEKDAY") continue;
+      if (blockedDays.get(employee.id)?.has(day)) continue;
+
+      const length = Math.min(deficit, 11);
+      if (length < mergedConfig.minShiftLength) break;
+
+      const options = [`${length}h RA`, `${length}h PO`];
+
+      const chosen = options.find((val) =>
+        canAssignEmployeeToShift(
+          schedule,
+          employees,
+          employee,
+          day,
+          val,
+          dayType,
+          mergedConfig.staffRequirements,
+          mergedConfig,
+          daysInMonth
+        )
+      );
+
+      if (!chosen) continue;
+
+      employeeSchedule[day] = chosen;
+      workedHours = workedHoursForEmployee(schedule, employee.id);
+      deficit = target - workedHours;
     }
   });
 
@@ -1139,7 +1435,7 @@ function generateScheduleOnce(
       difference: diff
     };
 
-    if (isNormTracked(employee) && diff < 0) {
+    if (isNormTracked(employee) && diff < 0 && !isAlertSuppressed(employee)) {
       warnings.push({
         date: "",
         shift: "DAY",
@@ -1150,7 +1446,7 @@ function generateScheduleOnce(
       });
     }
 
-    if (!ensureWeeklyRest(employeeSchedule, daysInMonth)) {
+    if (!isAlertSuppressed(employee) && !ensureWeeklyRest(employeeSchedule, daysInMonth)) {
       warnings.push({
         date: "",
         shift: "DAY",
@@ -1203,7 +1499,8 @@ function generateScheduleOnce(
       assignments: typeof dayAssignments,
       min: number,
       max: number | undefined,
-      shiftLabel: ShiftType
+      shiftLabel: ShiftType,
+      suppressAlerts = false
     ) => {
       segments.forEach((segment) => {
         const count = assignments.filter(
@@ -1212,7 +1509,7 @@ function generateScheduleOnce(
             item.employee.experienceLevel !== "NOWY" &&
             isActiveInSegment(item.intervals, segment.start, segment.end)
         ).length;
-        if (count < min) {
+        if (count < min && !suppressAlerts) {
           warnings.push({
             date: formatDate(year, monthIndex, day),
             shift: shiftLabel,
@@ -1225,7 +1522,7 @@ function generateScheduleOnce(
             )}): pokrycie roli ${label.toLowerCase()} spada poniżej minimum (${count}/${min}).`
           });
         }
-        if (max !== undefined && count > max) {
+        if (max !== undefined && count > max && !suppressAlerts) {
           warnings.push({
             date: formatDate(year, monthIndex, day),
             shift: shiftLabel,
@@ -1402,7 +1699,7 @@ function generateScheduleOnce(
       });
     }
 
-    if (requirement.headNurse > 0 && !headForDay) {
+    if (requirement.headNurse > 0 && !headForDay && !EXEMPT_EXTRA_ROLES.includes("ODDZIALOWA")) {
       warnings.push({
         date: formatDate(year, monthIndex, day),
         shift: "DAY",
@@ -1413,7 +1710,11 @@ function generateScheduleOnce(
       });
     }
 
-    if (requirement.zabiegowa > 0 && counters.zabiegowa < requirement.zabiegowa) {
+    if (
+      requirement.zabiegowa > 0 &&
+      counters.zabiegowa < requirement.zabiegowa &&
+      !EXEMPT_EXTRA_ROLES.includes("ZABIEGOWA")
+    ) {
       warnings.push({
         date: formatDate(year, monthIndex, day),
         shift: "DAY",
@@ -1454,13 +1755,14 @@ function generateScheduleOnce(
     if (requirement.magazynier) {
       checkCoverage(
         "Magazynier",
-        (emp) => emp.baseRole === "MAGAZYNIERKA",
-        daySegments,
-        dayAssignments,
-        requirement.magazynier.min,
-        requirement.magazynier.max,
-        "DAY"
-      );
+      (emp) => emp.baseRole === "MAGAZYNIERKA",
+      daySegments,
+      dayAssignments,
+      requirement.magazynier.min,
+      requirement.magazynier.max,
+      "DAY",
+      true
+    );
     }
     if (requirement.sekretarka) {
       checkCoverage(
@@ -1470,7 +1772,8 @@ function generateScheduleOnce(
         dayAssignments,
         requirement.sekretarka.min,
         requirement.sekretarka.max,
-        "DAY"
+        "DAY",
+        true
       );
     }
     if (requirement.terapeuta) {
@@ -1481,7 +1784,8 @@ function generateScheduleOnce(
         dayAssignments,
         requirement.terapeuta.min,
         requirement.terapeuta.max,
-        "DAY"
+        "DAY",
+        true
       );
     }
 
@@ -1593,6 +1897,14 @@ function scoreSchedule(result: ScheduleResult, previousSchedule?: Record<string,
   return coverageScore - warningPenalty - hourPenalty - similarityPenalty;
 }
 
+function isPerfectNormCompliance(result: ScheduleResult, employees: GeneratorEmployee[]) {
+  return employees.every((employee) => {
+    if (!isNormTracked(employee)) return true;
+    const diff = result.hoursSummary[employee.id]?.difference ?? 0;
+    return Math.abs(diff) < 0.01;
+  });
+}
+
 export async function generateSchedule(
   employees: GeneratorEmployee[],
   year: number,
@@ -1616,6 +1928,10 @@ export async function generateSchedule(
     const candidate = generateScheduleOnce(employees, year, monthIndex, requests, coreConfig, rng);
     const score = scoreSchedule(candidate, previousSchedule);
 
+    if (isPerfectNormCompliance(candidate, employees)) {
+      return candidate;
+    }
+
     if (score > bestScore) {
       bestScore = score;
       best = candidate;
@@ -1634,6 +1950,18 @@ export async function generateSchedule(
   const remaining = Math.max(0, minDuration - elapsed);
   if (remaining > 0) {
     await new Promise((resolve) => setTimeout(resolve, remaining));
+  }
+
+  if (best && !isPerfectNormCompliance(best, employees)) {
+    best.warnings.push({
+      date: "",
+      shift: "DAY",
+      dayType: "WEEKDAY",
+      code: "HOURS_UNDER_NORM",
+      employees: [],
+      description:
+        "Nie udało się ułożyć grafiku spełniającego wszystkie normy godzinowe w zadanym czasie bez naruszania innych ograniczeń."
+    });
   }
 
   if (best) return best;
