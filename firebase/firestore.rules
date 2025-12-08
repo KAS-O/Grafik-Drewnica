@@ -28,6 +28,14 @@ service cloud.firestore {
       return isSignedIn() && (hasAdminClaim() || hasAdminRole());
     }
 
+    function isValidSchedulePayload(monthId) {
+      return request.resource != null &&
+        request.resource.data.keys().hasOnly(["month", "entries", "customHolidays", "updatedAt"]) &&
+        request.resource.data.month == monthId &&
+        request.resource.data.entries is map &&
+        request.resource.data.customHolidays is list;
+    }
+
     match /users/{userId} {
       allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
       allow create: if isSignedIn() && request.auth.uid == userId;
@@ -49,7 +57,8 @@ service cloud.firestore {
 
     match /schedules/{monthId} {
       allow read: if isSignedIn();
-      allow create, update, delete: if isAdmin();
+      allow create, update: if isAdmin() && isValidSchedulePayload(monthId);
+      allow delete: if isAdmin();
     }
 
     match /{document=**} {

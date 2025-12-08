@@ -4,8 +4,8 @@ import type { PropsWithChildren } from "react";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { User } from "firebase/auth";
 import { getIdTokenResult, onAuthStateChanged } from "firebase/auth";
-import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { app, auth } from "../lib/firebase";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { auth, db } from "../lib/firebase";
 import { SUPER_ADMIN_UIDS } from "../lib/admin";
 
 type UserRole = "Administrator" | "Użytkownik";
@@ -52,7 +52,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
       setUser(firebaseUser);
 
       try {
-        const db = getFirestore(app);
         const userRef = doc(db, "users", firebaseUser.uid);
         const tokenResult = await getIdTokenResult(firebaseUser);
         const hasAdminClaim = tokenResult?.claims?.admin === true;
