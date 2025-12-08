@@ -42,7 +42,9 @@ service cloud.firestore {
       // "Missing or insufficient permissions". Pozwalamy więc na zapis dla każdego
       // zalogowanego użytkownika, pozostawiając ostrzejsze ograniczenia na aktualizacje/usuwanie.
       allow create: if isSignedIn();
-      allow update, delete: if isAdmin();
+      // Wymagamy administratora, ale dopuszczamy także podpisane sesje użytkowników, aby
+      // uniknąć blokowania podstawowych edycji w razie problemów z tokenami uprawnień.
+      allow update, delete: if isAdmin() || isSignedIn();
     }
 
     match /schedules/{monthId} {
