@@ -400,7 +400,12 @@ export default function AdminDashboardPage() {
       const extraRole = mapExtraRole(employee.extraRole, employee.position);
       const fte = mapFte(employee.employmentRate);
       const isEightHour =
-        fte === "1_etat_8h" || extraRole !== "NONE" || baseRole === "SEKRETARKA" || baseRole === "TERAPEUTKA" || baseRole === "MAGAZYNIERKA";
+        fte === "1_etat_8h" ||
+        extraRole !== "NONE" ||
+        baseRole === "SEKRETARKA" ||
+        baseRole === "TERAPEUTKA" ||
+        baseRole === "MAGAZYNIERKA" ||
+        baseRole === "OPIEKUN";
       const experienceLevel: ExperienceLevel = (employee.experienceLevel as ExperienceLevelOption | undefined) ?? "STANDARD";
       const educationLevel: EducationLevel =
         baseRole === "PIELEGNIARKA"
@@ -423,6 +428,16 @@ export default function AdminDashboardPage() {
 
   const handleGeneratorFormChange = (key: keyof typeof generatorForm, value: string) => {
     setGeneratorForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleClearSchedule = () => {
+    const cleared = mergeEntriesWithEmployees({}, employees);
+    setScheduleEntries(cleared);
+    setScheduleDirty(true);
+    scheduleDirtyRef.current = true;
+    setGeneratorResult(null);
+    setGeneratorStatus("");
+    setStatus({ type: "success", text: "Wyczyszczono grafik – możesz rozpocząć od pustego układu." });
   };
 
   const handleAddGeneratorRequest = () => {
@@ -475,14 +490,12 @@ export default function AdminDashboardPage() {
         hours: Number.isFinite(monthlyNormInput.hours) ? Math.max(0, monthlyNormInput.hours) : 0,
         minutes: Number.isFinite(monthlyNormInput.minutes) ? Math.max(0, monthlyNormInput.minutes % 60) : 0
       };
-      const result = await Promise.resolve(
-        generateSchedule(
+      const result = await generateSchedule(
         generatorEmployees,
         currentMonth.getFullYear(),
         currentMonth.getMonth(),
         generatorRequests,
-        { customMonthlyNorm: sanitizedNorm, holidays: generatorHolidaySet }
-        )
+        { customMonthlyNorm: sanitizedNorm, holidays: generatorHolidaySet, previousSchedule: generatorResult?.schedule }
       );
       setGeneratorResult(result);
       setGeneratorStatus("Wygenerowano grafik na wybrany miesiąc.");
@@ -946,7 +959,7 @@ export default function AdminDashboardPage() {
           <div className="flex flex-col items-center gap-4 rounded-3xl border border-sky-200/40 bg-slate-900/90 px-6 py-5 shadow-2xl">
             <div className="h-12 w-12 animate-spin rounded-full border-4 border-sky-200/70 border-t-transparent" />
             <p className="text-lg font-semibold text-sky-50">Generowanie grafiku...</p>
-            <p className="text-xs text-sky-100/70">Operacja może potrwać do 20 sekund.</p>
+            <p className="text-xs text-sky-100/70">Proces trwa co najmniej 10 sekund i maksymalnie 60 sekund.</p>
           </div>
         </div>
       )}
@@ -1529,6 +1542,15 @@ export default function AdminDashboardPage() {
                   </button>
                 </div>
                 <p className="text-sm font-semibold text-sky-50">{getMonthLabel(currentMonth)}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleClearSchedule}
+                    className="rounded-full border border-rose-200/50 bg-rose-900/60 px-3 py-1 text-xs font-semibold text-rose-50 shadow-inner transition hover:bg-rose-800/70"
+                  >
+                    Wyczyść grafik
+                  </button>
+                </div>
               </div>
 
               <div className="relative w-full overflow-hidden rounded-2xl border border-sky-200/30">
@@ -1817,7 +1839,10 @@ export default function AdminDashboardPage() {
                   <li>• Odpoczynek tygodniowy: minimum 35h w każdym 7-dniowym oknie.</li>
                   <li>• Maksymalnie 13h pracy w dobie, minimalna długość zmiany 6h.</li>
                   <li>• Automatyczne liczenie normy miesięcznej na bazie dni roboczych i świąt (możesz ją nadpisać).</li>
-                  <li>• Minimalne obsady dnia: 3 pielęgniarki, 1 sanitariusz, 2 salowe, maks. 1 opiekun.</li>
+                  <li>
+                    • Minimalne obsady dnia: 3 pielęgniarki, preferencyjnie 1 sanitariusz (drugi tylko przy brakach godzinowych), 2
+                    salowe, opiekun medyczny pracuje w dni robocze na etacie 8h.
+                  </li>
                   <li>• Krótsze dyżury (6–11h) tylko gdy brakuje kilku godzin do normy.</li>
                   <li>• Prośby „Preferuje dyżur” zwiększają szansę na przydział w danym dniu.</li>
                 </ul>
