@@ -40,6 +40,8 @@ import {
   type SimpleEmployee
 } from "../utils";
 
+export const dynamic = "force-dynamic";
+
 type ShiftValue = string;
 
 type Position =
@@ -1253,6 +1255,7 @@ export default function AdminDashboardPage() {
             </p>
           </section>
         )}
+      </div>
       </div>
     </main>
   );
