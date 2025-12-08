@@ -182,6 +182,7 @@ export default function AdminDashboardPage() {
     position: POSITIONS[0],
     employmentRate: EMPLOYMENT_RATES[0]
   });
+  const [activeSection, setActiveSection] = useState<"schedule" | "employees" | "generator">("schedule");
 
   useEffect(() => {
     scheduleDirtyRef.current = scheduleDirty;
@@ -645,6 +646,27 @@ export default function AdminDashboardPage() {
           </div>
         </header>
 
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-rose-300/30 bg-rose-900/40 px-3 py-2 text-xs font-semibold uppercase tracking-[0.15em] text-rose-100">
+          {[
+            { key: "schedule" as const, label: "Edycja grafiku" },
+            { key: "employees" as const, label: "Zarządzanie pracownikami" },
+            { key: "generator" as const, label: "Generator grafików" }
+          ].map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setActiveSection(item.key)}
+              className={`rounded-full px-3 py-1 text-[11px] transition ${
+                activeSection === item.key
+                  ? "bg-rose-400 text-slate-950 shadow-neon"
+                  : "border border-rose-200/40 bg-rose-50/5 text-rose-100 hover:bg-rose-400/20"
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
         {status.text && (
           <div
             className={`rounded-2xl border px-4 py-3 text-sm ${
@@ -659,282 +681,286 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
-        <section className="rounded-3xl border border-rose-400/30 bg-gradient-to-r from-rose-950 via-rose-900/60 to-slate-950 p-5 text-rose-50 shadow-xl">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-2">
-              <div className="inline-flex items-center gap-2 rounded-full border border-rose-300/40 bg-rose-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-rose-100">
-                <span className="h-2 w-2 rounded-full bg-rose-400 shadow-neon" />
-                Panel Administracji
-              </div>
-              <div className="space-y-1">
-                <h2 className="text-lg font-semibold text-rose-50">Dodawanie i usuwanie pracowników</h2>
-                <p className="max-w-3xl text-sm text-rose-100/80">
-                  Dodawaj i usuwaj osoby z listy pracowników. Zmiany od razu dostępne w grafiku.
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-              <span className="rounded-full border border-emerald-400/50 bg-emerald-500/10 px-3 py-1 text-emerald-100">
-                {isAdmin ? "Administrator" : "Podgląd"}
-              </span>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-            <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Dodawanie pracowników</h3>
-              {isAdmin ? (
-                <form onSubmit={handleAddEmployee} className="mt-3 space-y-4">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-rose-100">Imię</label>
-                      <input
-                        type="text"
-                        value={employeeForm.firstName}
-                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, firstName: e.target.value }))}
-                        className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs uppercase tracking-wide text-rose-100">Nazwisko</label>
-                      <input
-                        type="text"
-                        value={employeeForm.lastName}
-                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, lastName: e.target.value }))}
-                        className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
-                      />
-                    </div>
+        {activeSection === "employees" && (
+          <>
+            <section className="rounded-3xl border border-rose-400/30 bg-gradient-to-r from-rose-950 via-rose-900/60 to-slate-950 p-5 text-rose-50 shadow-xl">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-rose-300/40 bg-rose-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-rose-100">
+                    <span className="h-2 w-2 rounded-full bg-rose-400 shadow-neon" />
+                    Panel Administracji
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs uppercase tracking-wide text-rose-100">Stanowisko</label>
-                    <select
-                      value={employeeForm.position}
-                      onChange={(e) => setEmployeeForm((prev) => ({ ...prev, position: e.target.value as Position }))}
-                      className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
-                    >
-                      {POSITIONS.map((pos) => (
-                        <option key={pos} value={pos} className="bg-slate-900">
-                          {pos}
-                        </option>
-                      ))}
-                    </select>
+                    <h2 className="text-lg font-semibold text-rose-50">Dodawanie i usuwanie pracowników</h2>
+                    <p className="max-w-3xl text-sm text-rose-100/80">
+                      Dodawaj i usuwaj osoby z listy pracowników. Zmiany od razu dostępne w grafiku.
+                    </p>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-xs uppercase tracking-wide text-rose-100">Etat</label>
-                    <select
-                      value={employeeForm.employmentRate}
-                      onChange={(e) =>
-                        setEmployeeForm((prev) => ({ ...prev, employmentRate: e.target.value as EmploymentRate }))
-                      }
-                      className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
-                    >
-                      {EMPLOYMENT_RATES.map((rate) => (
-                        <option key={rate} value={rate} className="bg-slate-900">
-                          {rate}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={formPending}
-                    className="w-full rounded-2xl bg-gradient-to-r from-rose-400 via-rose-500 to-rose-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {formPending ? "Dodawanie..." : "Dodaj pracownika"}
-                  </button>
-                </form>
-              ) : (
-                <p className="mt-2 text-sm text-rose-100/80">
-                  Panel administracyjny jest dostępny tylko dla administratorów. Poproś o dostęp, aby dodawać pracowników i edytować grafik.
-                </p>
-              )}
-            </div>
-
-            <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Lista pracowników</h3>
-                <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-rose-200">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={!!employees.length && selectedEmployeeIds.length === employees.length}
-                      onChange={(e) => handleSelectAll(e.target.checked)}
-                      className="h-4 w-4 rounded border-rose-200 bg-rose-950/40 text-rose-400 focus:ring-rose-300"
-                    />
-                    <span>Wybierz wszystkich</span>
-                  </label>
-                  <span className="rounded-full border border-rose-200/40 bg-rose-900/60 px-2 py-0.5 text-[10px]">
-                    Wybrano {selectedEmployeeIds.length}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                  <span className="rounded-full border border-emerald-400/50 bg-emerald-500/10 px-3 py-1 text-emerald-100">
+                    {isAdmin ? "Administrator" : "Podgląd"}
                   </span>
                 </div>
               </div>
 
-              <div className="mt-2 flex flex-wrap gap-2 text-[12px]">
-                {EMPLOYMENT_RATES.map((rate) => (
-                  <button
-                    key={rate}
-                    type="button"
-                    onClick={() => handleApplyEmploymentRate(rate)}
-                    disabled={formPending}
-                    className="rounded-full border border-rose-200/40 bg-rose-800/60 px-3 py-1 font-semibold text-rose-50 transition hover:brightness-110 disabled:opacity-60"
-                  >
-                    Ustaw {rate}
-                  </button>
-                ))}
-              </div>
-
-              <div className="mt-3 max-h-[28rem] space-y-4 overflow-y-auto pr-1">
-                {groupedEmployees.map((group, groupIndex) => {
-                  const theme = getPositionTheme(group.position);
-
-                  return (
-                    <div
-                      key={group.position}
-                      className={`space-y-3 rounded-2xl border p-3 ${
-                        groupIndex ? "border-rose-200/10" : ""
-                      } ${theme.containerBg} ${theme.containerBorder}`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`h-2 w-2 rounded-full ${theme.accentDot}`} />
-                        <p className={`text-[11px] uppercase tracking-[0.2em] ${theme.labelText}`}>{group.position}</p>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${theme.labelPill}`}>
-                          {group.items.length} os.
-                        </span>
+              <div className="mt-5 grid gap-4 md:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Dodawanie pracowników</h3>
+                  {isAdmin ? (
+                    <form onSubmit={handleAddEmployee} className="mt-3 space-y-4">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="space-y-1">
+                          <label className="text-xs uppercase tracking-wide text-rose-100">Imię</label>
+                          <input
+                            type="text"
+                            value={employeeForm.firstName}
+                            onChange={(e) => setEmployeeForm((prev) => ({ ...prev, firstName: e.target.value }))}
+                            className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs uppercase tracking-wide text-rose-100">Nazwisko</label>
+                          <input
+                            type="text"
+                            value={employeeForm.lastName}
+                            onChange={(e) => setEmployeeForm((prev) => ({ ...prev, lastName: e.target.value }))}
+                            className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                          />
+                        </div>
                       </div>
-                      <div className="space-y-2">
-                        {group.items.map((employee) => (
-                          <div
-                            key={employee.id}
-                            className={`flex w-full flex-wrap items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm shadow-inner transition ${theme.rowBg} ${theme.rowBorder}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedEmployeeIds.includes(employee.id)}
-                              onChange={(e) => handleSelectEmployee(employee.id, e.target.checked)}
-                              className="h-4 w-4 rounded border-rose-200 bg-rose-950/50 text-rose-300 focus:ring-rose-300"
-                            />
-                            <div className="min-w-[12rem] flex-1">
-                              <div className="font-semibold text-rose-50">{employee.firstName} {employee.lastName}</div>
-                              <div className="text-[12px] uppercase tracking-wide text-rose-100/70">{employee.position}</div>
-                              <div className="text-[11px] text-rose-100/70">{employee.employmentRate || "brak danych"}</div>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => handleStartEdit(employee)}
-                                className="rounded-full border border-rose-200/50 bg-rose-50/10 px-3 py-1 text-[11px] font-semibold text-rose-50 transition hover:brightness-110"
-                              >
-                                Edytuj
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteEmployee(employee.id)}
-                                disabled={deletingEmployeeId === employee.id}
-                                className="rounded-full border border-red-300/60 bg-red-500/20 px-3 py-1 text-[11px] font-semibold text-red-50 transition hover:bg-red-500/30 disabled:opacity-70"
-                              >
-                                {deletingEmployeeId === employee.id ? "Usuwanie..." : "Usuń"}
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                      <div className="space-y-1">
+                        <label className="text-xs uppercase tracking-wide text-rose-100">Stanowisko</label>
+                        <select
+                          value={employeeForm.position}
+                          onChange={(e) => setEmployeeForm((prev) => ({ ...prev, position: e.target.value as Position }))}
+                          className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                        >
+                          {POSITIONS.map((pos) => (
+                            <option key={pos} value={pos} className="bg-slate-900">
+                              {pos}
+                            </option>
+                          ))}
+                        </select>
                       </div>
+                      <div className="space-y-1">
+                        <label className="text-xs uppercase tracking-wide text-rose-100">Etat</label>
+                        <select
+                          value={employeeForm.employmentRate}
+                          onChange={(e) =>
+                            setEmployeeForm((prev) => ({ ...prev, employmentRate: e.target.value as EmploymentRate }))
+                          }
+                          className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70"
+                        >
+                          {EMPLOYMENT_RATES.map((rate) => (
+                            <option key={rate} value={rate} className="bg-slate-900">
+                              {rate}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={formPending}
+                        className="w-full rounded-2xl bg-gradient-to-r from-rose-400 via-rose-500 to-rose-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {formPending ? "Dodawanie..." : "Dodaj pracownika"}
+                      </button>
+                    </form>
+                  ) : (
+                    <p className="mt-2 text-sm text-rose-100/80">
+                      Panel administracyjny jest dostępny tylko dla administratorów. Poproś o dostęp, aby dodawać pracowników i edytować grafik.
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-rose-300/30 bg-rose-900/40 p-4 shadow-inner">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Lista pracowników</h3>
+                    <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-rose-200">
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={!!employees.length && selectedEmployeeIds.length === employees.length}
+                          onChange={(e) => handleSelectAll(e.target.checked)}
+                          className="h-4 w-4 rounded border-rose-200 bg-rose-950/40 text-rose-400 focus:ring-rose-300"
+                        />
+                        <span>Wybierz wszystkich</span>
+                      </label>
+                      <span className="rounded-full border border-rose-200/40 bg-rose-900/60 px-2 py-0.5 text-[10px]">
+                        Wybrano {selectedEmployeeIds.length}
+                      </span>
                     </div>
-                  );
-                })}
+                  </div>
 
-                {!employees.length && (
-                  <p className="text-sm text-rose-100/80">Brak pracowników do wyświetlenia.</p>
-                )}
+                  <div className="mt-2 flex flex-wrap gap-2 text-[12px]">
+                    {EMPLOYMENT_RATES.map((rate) => (
+                      <button
+                        key={rate}
+                        type="button"
+                        onClick={() => handleApplyEmploymentRate(rate)}
+                        disabled={formPending}
+                        className="rounded-full border border-rose-200/40 bg-rose-800/60 px-3 py-1 font-semibold text-rose-50 transition hover:brightness-110 disabled:opacity-60"
+                      >
+                        Ustaw {rate}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mt-3 max-h-[28rem] space-y-4 overflow-y-auto pr-1">
+                    {groupedEmployees.map((group, groupIndex) => {
+                      const theme = getPositionTheme(group.position);
+
+                      return (
+                        <div
+                          key={group.position}
+                          className={`space-y-3 rounded-2xl border p-3 ${
+                            groupIndex ? "border-rose-200/10" : ""
+                          } ${theme.containerBg} ${theme.containerBorder}`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${theme.accentDot}`} />
+                            <p className={`text-[11px] uppercase tracking-[0.2em] ${theme.labelText}`}>{group.position}</p>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${theme.labelPill}`}>
+                              {group.items.length} os.
+                            </span>
+                          </div>
+                          <div className="space-y-2">
+                            {group.items.map((employee) => (
+                              <div
+                                key={employee.id}
+                                className={`flex w-full flex-wrap items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm shadow-inner transition ${theme.rowBg} ${theme.rowBorder}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedEmployeeIds.includes(employee.id)}
+                                  onChange={(e) => handleSelectEmployee(employee.id, e.target.checked)}
+                                  className="h-4 w-4 rounded border-rose-200 bg-rose-950/50 text-rose-300 focus:ring-rose-300"
+                                />
+                                <div className="min-w-[12rem] flex-1">
+                                  <div className="font-semibold text-rose-50">{employee.firstName} {employee.lastName}</div>
+                                  <div className="text-[12px] uppercase tracking-wide text-rose-100/70">{employee.position}</div>
+                                  <div className="text-[11px] text-rose-100/70">{employee.employmentRate || "brak danych"}</div>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEdit(employee)}
+                                    className="rounded-full border border-rose-200/50 bg-rose-50/10 px-3 py-1 text-[11px] font-semibold text-rose-50 transition hover:brightness-110"
+                                  >
+                                    Edytuj
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteEmployee(employee.id)}
+                                    disabled={deletingEmployeeId === employee.id}
+                                    className="rounded-full border border-red-300/60 bg-red-500/20 px-3 py-1 text-[11px] font-semibold text-red-50 transition hover:bg-red-500/30 disabled:opacity-70"
+                                  >
+                                    {deletingEmployeeId === employee.id ? "Usuwanie..." : "Usuń"}
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {!employees.length && (
+                      <p className="text-sm text-rose-100/80">Brak pracowników do wyświetlenia.</p>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        </section>
+            </section>
 
-        <section className="rounded-3xl border border-rose-300/30 bg-rose-900/30 p-5 shadow-inner">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Edycja pracownika</h3>
-              <p className="text-xs text-rose-100/80">Wybierz osobę z listy i zaktualizuj jej dane.</p>
-            </div>
-            <span className="rounded-full border border-rose-200/50 bg-rose-800/50 px-3 py-1 text-[11px] font-semibold text-rose-100">
-              {editingEmployeeId ? "Tryb edycji" : "Brak wybranej osoby"}
-            </span>
-          </div>
+            <section className="rounded-3xl border border-rose-300/30 bg-rose-900/30 p-5 shadow-inner">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-rose-100">Edycja pracownika</h3>
+                  <p className="text-xs text-rose-100/80">Wybierz osobę z listy i zaktualizuj jej dane.</p>
+                </div>
+                <span className="rounded-full border border-rose-200/50 bg-rose-800/50 px-3 py-1 text-[11px] font-semibold text-rose-100">
+                  {editingEmployeeId ? "Tryb edycji" : "Brak wybranej osoby"}
+                </span>
+              </div>
 
-          <form onSubmit={handleUpdateEmployee} className="mt-4 grid gap-3 md:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wide text-rose-100">Imię</label>
-              <input
-                type="text"
-                value={editForm.firstName}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, firstName: e.target.value }))}
-                disabled={!editingEmployeeId}
-                className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wide text-rose-100">Nazwisko</label>
-              <input
-                type="text"
-                value={editForm.lastName}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, lastName: e.target.value }))}
-                disabled={!editingEmployeeId}
-                className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wide text-rose-100">Stanowisko</label>
-              <select
-                value={editForm.position}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, position: e.target.value as Position }))}
-                disabled={!editingEmployeeId}
-                className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {POSITIONS.map((pos) => (
-                  <option key={pos} value={pos} className="bg-slate-900">
-                    {pos}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs uppercase tracking-wide text-rose-100">Etat</label>
-              <select
-                value={editForm.employmentRate}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, employmentRate: e.target.value as EmploymentRate }))}
-                disabled={!editingEmployeeId}
-                className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {EMPLOYMENT_RATES.map((rate) => (
-                  <option key={rate} value={rate} className="bg-slate-900">
-                    {rate}
-                  </option>
-                ))}
-              </select>
-            </div>
+              <form onSubmit={handleUpdateEmployee} className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <label className="text-xs uppercase tracking-wide text-rose-100">Imię</label>
+                  <input
+                    type="text"
+                    value={editForm.firstName}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, firstName: e.target.value }))}
+                    disabled={!editingEmployeeId}
+                    className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs uppercase tracking-wide text-rose-100">Nazwisko</label>
+                  <input
+                    type="text"
+                    value={editForm.lastName}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, lastName: e.target.value }))}
+                    disabled={!editingEmployeeId}
+                    className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs uppercase tracking-wide text-rose-100">Stanowisko</label>
+                  <select
+                    value={editForm.position}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, position: e.target.value as Position }))}
+                    disabled={!editingEmployeeId}
+                    className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {POSITIONS.map((pos) => (
+                      <option key={pos} value={pos} className="bg-slate-900">
+                        {pos}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs uppercase tracking-wide text-rose-100">Etat</label>
+                  <select
+                    value={editForm.employmentRate}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, employmentRate: e.target.value as EmploymentRate }))}
+                    disabled={!editingEmployeeId}
+                    className="w-full rounded-xl border border-rose-200/50 bg-rose-950/50 px-3 py-2 text-sm text-rose-50 outline-none focus:border-rose-200 focus:ring-2 focus:ring-rose-300/70 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {EMPLOYMENT_RATES.map((rate) => (
+                      <option key={rate} value={rate} className="bg-slate-900">
+                        {rate}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            <div className="flex flex-wrap items-center gap-2 md:col-span-2">
-              <button
-                type="submit"
-                disabled={!editingEmployeeId || formPending}
-                className="rounded-full bg-gradient-to-r from-rose-400 via-rose-500 to-rose-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {formPending ? "Zapisywanie..." : "Zapisz zmiany"}
-              </button>
-              <button
-                type="button"
-                onClick={handleCancelEdit}
-                className="rounded-full border border-rose-200/50 bg-rose-50/5 px-4 py-2 text-sm font-semibold text-rose-50 transition hover:brightness-110"
-              >
-                Anuluj
-              </button>
-              <p className="text-xs text-rose-100/70">Edycja zapisuje dane bezpośrednio w bazie i aktualizuje grafik.</p>
-            </div>
-          </form>
-        </section>
+                <div className="flex flex-wrap items-center gap-2 md:col-span-2">
+                  <button
+                    type="submit"
+                    disabled={!editingEmployeeId || formPending}
+                    className="rounded-full bg-gradient-to-r from-rose-400 via-rose-500 to-rose-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow-neon transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {formPending ? "Zapisywanie..." : "Zapisz zmiany"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    className="rounded-full border border-rose-200/50 bg-rose-50/5 px-4 py-2 text-sm font-semibold text-rose-50 transition hover:brightness-110"
+                  >
+                    Anuluj
+                  </button>
+                  <p className="text-xs text-rose-100/70">Edycja zapisuje dane bezpośrednio w bazie i aktualizuje grafik.</p>
+                </div>
+              </form>
+            </section>
+          </>
+        )}
 
-        <section className="grid min-w-0 gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="glass-panel min-w-0 rounded-3xl border border-sky-200/20 bg-slate-900/60 p-5 md:p-6">
+        {activeSection === "schedule" && (
+          <section className="glass-panel min-w-0 rounded-3xl border border-sky-200/20 bg-slate-900/60 p-5 md:p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-col gap-1">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Edycja grafiku</h2>
@@ -1196,65 +1222,21 @@ export default function AdminDashboardPage() {
                 </button>
               </div>
             </div>
-          </div>
-
-          <div className="glass-panel min-w-0 rounded-3xl p-5 md:p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Podgląd ustawień</h2>
-                <p className="text-xs text-sky-100/80">Aktualny tryb wstawiania dyżurów.</p>
-              </div>
-              <span className="rounded-full bg-sky-400/10 px-3 py-1 text-[11px] font-semibold text-sky-100">{employees.length}</span>
-            </div>
-
-              <div className="space-y-3 text-sm text-sky-100/90">
-                <div className="rounded-2xl border border-sky-200/30 bg-slate-900/60 px-4 py-3">
-                  <p className="text-xs uppercase tracking-wide text-sky-200">Wybrany tryb</p>
-                  <p className="mt-1 text-base font-semibold text-sky-50">
-                    {activeAction === "D" && "Dzień (D)"}
-                    {activeAction === "N" && "Noc (N)"}
-                    {activeAction === "1" && "1 etat (8h)"}
-                    {activeAction === "hours" && `Godziny: ${hoursValue}`}
-                    {activeAction === "clear" && "Czyszczenie pola"}
-                    {(activeAction === "o" || activeAction === "r") &&
-                      `Dodatek: ${activeAction} + ${primaryShift === "hours" ? `godziny (${hoursValue})` : primaryShift}`}
-                    {activeAction === "k" &&
-                      `Dodatek: K + ${primaryShift === "hours" ? `godziny (${hoursValue})` : primaryShift}`}
-                  </p>
-                  <p className="mt-2 text-xs text-sky-100/70">
-                    Bazowy dyżur: {primaryShift === "hours" ? `godziny (${hoursValue})` : primaryShift}
-                  </p>
-                </div>
-
-              <div className="rounded-2xl border border-sky-200/30 bg-slate-900/60 px-4 py-3">
-                <p className="text-xs uppercase tracking-wide text-sky-200">Święta własne</p>
-                <div className="mt-2 flex flex-wrap gap-2 text-[12px]">
-                  {customHolidays.length ? (
-                    customHolidays
-                      .sort((a, b) => a - b)
-                      .map((day) => (
-                        <span key={day} className="rounded-full bg-rose-400/20 px-3 py-1 text-rose-50">
-                          {day} {getMonthLabel(currentMonth)}
-                        </span>
-                      ))
-                  ) : (
-                    <span className="text-sky-100/70">Brak dodatkowych świąt w tym miesiącu.</span>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-sky-200/30 bg-slate-900/60 px-4 py-3 text-xs text-sky-100/80">
-                <p>
-                  • Święta można zaznaczać przy nagłówkach dni (przycisk Ś).<br />• Litery <strong>o</strong> i <strong>r</strong> oznaczają odpowiednio ostrą i rehabilitacyjną część oddziału.<br />• Wpisanie liczby godzin (np. 6:10) ustawia dyżur dzienny z krótkim czasem pracy.
-                </p>
-              </div>
-            </div>
-
-            {loadingData && <p className="mt-4 text-xs text-sky-100/70">Trwa pobieranie danych...</p>}
+            {loadingData && <p className="text-xs text-sky-100/70">Trwa pobieranie danych...</p>}
           </div>
         </section>
+        )}
+
+        {activeSection === "generator" && (
+          <section className="rounded-3xl border border-sky-200/20 bg-slate-900/50 p-5 text-sky-100 shadow-inner">
+            <div className="flex flex-col gap-2">
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-sky-200">Generator grafików</h2>
+              <p className="text-sm text-sky-100/80">Sekcja w przygotowaniu. Wkrótce pojawią się tu narzędzia do automatycznego tworzenia grafików.</p>
+            </div>
+          </section>
+        )}
         </div>
       </div>
-    </main>
-  );
-}
+      </main>
+    );
+  }
