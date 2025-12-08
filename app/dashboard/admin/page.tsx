@@ -155,6 +155,12 @@ function extractShiftBadges(value: string) {
 
 function normalizeHours(raw: string): string | null {
   const trimmed = raw.trim();
+  const pureNumber = trimmed.match(/^\d{1,2}$/);
+  if (pureNumber) {
+    const hours = Number.parseInt(pureNumber[0] ?? "", 10);
+    if (Number.isNaN(hours) || hours > 23) return null;
+    return `${hours}:00`;
+  }
   const match = trimmed.match(/^(\d{1,2}):(\d{2})$/);
   if (!match) return null;
 
@@ -197,6 +203,7 @@ export default function AdminDashboardPage() {
   const [formPending, setFormPending] = useState(false);
   const [activeAction, setActiveAction] = useState<ShiftAction>("D");
   const [hoursValue, setHoursValue] = useState("6:10");
+  const [hoursSegment, setHoursSegment] = useState<"RA" | "PO">("RA");
   const db: Firestore = firestore;
 
   useEffect(() => {
@@ -778,8 +785,11 @@ export default function AdminDashboardPage() {
   };
 
   const formatShiftValue = (base: string, extras: Set<string>) => {
+    const segments: string[] = [];
+    if (extras.has("RA")) segments.push("RA");
+    if (extras.has("PO")) segments.push("PO");
     const orderedExtras = ["O", "R", "K"].filter((mark) => extras.has(mark));
-    return [base, ...orderedExtras].filter(Boolean).join(" ").trim();
+    return [base, ...segments, ...orderedExtras].filter(Boolean).join(" ").trim();
   };
 
   const handleApplyShift = (employeeId: string, dayNumber: number) => {
@@ -808,6 +818,7 @@ export default function AdminDashboardPage() {
       }
       nextBase = normalized;
       nextExtras.clear();
+      nextExtras.add(hoursSegment);
     }
 
     if (activeAction === "o") {
@@ -1438,7 +1449,7 @@ export default function AdminDashboardPage() {
                   >
                     1 (8h / Pn-Pt)
                   </button>
-                  <div className="flex items-center gap-2 rounded-full border border-sky-200/40 px-3 py-1">
+                  <div className="flex flex-wrap items-center gap-2 rounded-full border border-sky-200/40 px-3 py-1">
                     <label className="text-sky-100">Godziny</label>
                     <input
                       value={hoursValue}
@@ -1454,6 +1465,22 @@ export default function AdminDashboardPage() {
                     >
                       Ustaw
                     </button>
+                    <div className="flex items-center gap-1 rounded-full bg-slate-900/70 px-2 py-1">
+                      <button
+                        type="button"
+                        onClick={() => setHoursSegment("RA")}
+                        className={`rounded-full px-2 py-1 text-[11px] ${hoursSegment === "RA" ? "bg-amber-300 text-amber-950" : "border border-sky-200/40 text-sky-100"}`}
+                      >
+                        RA
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHoursSegment("PO")}
+                        className={`rounded-full px-2 py-1 text-[11px] ${hoursSegment === "PO" ? "bg-sky-300 text-slate-950" : "border border-sky-200/40 text-sky-100"}`}
+                      >
+                        PO
+                      </button>
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -1491,7 +1518,7 @@ export default function AdminDashboardPage() {
                   </button>
                 </div>
                 <span className="text-[11px] text-sky-200/80">
-                  Krótkie godziny (np. 6:10) są traktowane jako dyżur dzienny; dyżury nocne nie mają skróconych godzin.
+                  Krótkie godziny (np. 6:10) można wstawiać jako blok RA (rano) lub PO (popołudnie/noc), co wpływa na godziny startu dyżuru.
                 </span>
               </div>
 
