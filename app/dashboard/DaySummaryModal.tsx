@@ -44,7 +44,7 @@ export function DaySummaryModal({ dayLabel, dayNumber, assignments, onClose }: D
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-4xl overflow-hidden rounded-3xl border border-sky-200/50 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 p-6 shadow-2xl"
+        className="relative w-full max-w-5xl overflow-hidden rounded-3xl border border-sky-200/50 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 p-6 shadow-2xl max-h-[80vh] overflow-y-auto"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
