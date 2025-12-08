@@ -620,7 +620,7 @@ export default function AdminDashboardPage() {
   const visibleEmployees = sortedEmployees;
 
   return (
-    <main className="min-h-screen bg-slate-950 px-3 py-6 text-sky-50">
+    <main className="min-h-screen overflow-x-hidden bg-slate-950 px-3 py-6 text-sky-50">
       <div className="mx-auto w-full max-w-[1600px]">
         <div className="flex w-full flex-col gap-6">
         <header className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-rose-200/30 bg-rose-950/60 p-4 shadow-lg">
@@ -1078,9 +1078,8 @@ export default function AdminDashboardPage() {
               <p className="text-sm font-semibold text-sky-50">{getMonthLabel(currentMonth)}</p>
             </div>
 
-            <div className="relative w-full overflow-x-hidden rounded-2xl border border-sky-200/30">
-              <div className="w-full overflow-x-auto overscroll-x-contain">
-                <table className="min-w-[1200px] text-[11px] text-sky-50">
+            <div className="relative w-full max-w-full overflow-x-auto overscroll-x-contain rounded-2xl border border-sky-200/30">
+              <table className="min-w-[1200px] text-[11px] text-sky-50">
                   <thead className="bg-slate-900/60">
                     <tr>
                       <th className="sticky left-0 z-20 bg-slate-900/60 px-4 py-3 text-left text-xs font-semibold">Pracownik</th>

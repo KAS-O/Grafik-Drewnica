@@ -40,9 +40,11 @@ service cloud.firestore {
       // Weryfikacja uprawnień odbywa się w panelu (widoczny tylko dla Administratora),
       // ale w środowiskach bez poprawnie ustawionych ról w Firestore pojawiał się błąd
       // "Missing or insufficient permissions". Pozwalamy więc na zapis dla każdego
-      // zalogowanego użytkownika, pozostawiając ostrzejsze ograniczenia na aktualizacje/usuwanie.
+      // zalogowanego użytkownika, a aktualizację danych w grafiku udostępniamy wszystkim
+      // zalogowanym, pozostawiając usuwanie tylko dla administratorów.
       allow create: if isSignedIn();
-      allow update, delete: if isAdmin();
+      allow update: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
     match /schedules/{monthId} {
