@@ -365,9 +365,9 @@ export default function AdminDashboardPage() {
   const generatorEmployees = useMemo<GeneratorEmployee[]>(() => {
     const mapBaseRole = (position: string): GeneratorEmployee["baseRole"] => {
       const normalized = (position || "").toLowerCase();
-      if (normalized.includes("magazynier")) return "MAGAZYNIER";
+      if (normalized.includes("magazynier")) return "MAGAZYNIERKA";
       if (normalized.includes("sekret")) return "SEKRETARKA";
-      if (normalized.includes("terapeuta") && normalized.includes("zaj")) return "TERAPEUTA";
+      if (normalized.includes("terapeuta") && normalized.includes("zaj")) return "TERAPEUTKA";
       if (normalized.includes("sanitariusz")) return "SANITARIUSZ";
       if (normalized.includes("salow")) return "SALOWA";
       if (normalized.includes("opiekun")) return "OPIEKUN";
@@ -399,7 +399,8 @@ export default function AdminDashboardPage() {
       const baseRole = mapBaseRole(employee.position);
       const extraRole = mapExtraRole(employee.extraRole, employee.position);
       const fte = mapFte(employee.employmentRate);
-      const isEightHour = fte === "1_etat_8h" || extraRole !== "NONE" || baseRole === "SEKRETARKA" || baseRole === "TERAPEUTA" || baseRole === "MAGAZYNIER";
+      const isEightHour =
+        fte === "1_etat_8h" || extraRole !== "NONE" || baseRole === "SEKRETARKA" || baseRole === "TERAPEUTKA" || baseRole === "MAGAZYNIERKA";
       const experienceLevel: ExperienceLevel = (employee.experienceLevel as ExperienceLevelOption | undefined) ?? "STANDARD";
       const educationLevel: EducationLevel =
         baseRole === "PIELEGNIARKA"
@@ -459,7 +460,7 @@ export default function AdminDashboardPage() {
     });
   };
 
-  const handleGenerateSchedule = () => {
+  const handleGenerateSchedule = async () => {
     if (!generatorEmployees.length) {
       setGeneratorStatus("Brak pracowników do ułożenia grafiku.");
       return;
@@ -469,16 +470,19 @@ export default function AdminDashboardPage() {
     setGeneratorStatus("");
 
     try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
       const sanitizedNorm: WorkTimeNorm = {
         hours: Number.isFinite(monthlyNormInput.hours) ? Math.max(0, monthlyNormInput.hours) : 0,
         minutes: Number.isFinite(monthlyNormInput.minutes) ? Math.max(0, monthlyNormInput.minutes % 60) : 0
       };
-      const result = generateSchedule(
+      const result = await Promise.resolve(
+        generateSchedule(
         generatorEmployees,
         currentMonth.getFullYear(),
         currentMonth.getMonth(),
         generatorRequests,
         { customMonthlyNorm: sanitizedNorm, holidays: generatorHolidaySet }
+        )
       );
       setGeneratorResult(result);
       setGeneratorStatus("Wygenerowano grafik na wybrany miesiąc.");
@@ -937,6 +941,15 @@ export default function AdminDashboardPage() {
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-slate-950 px-3 py-6 text-sky-50">
+      {generatorPending && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-slate-950/70 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-4 rounded-3xl border border-sky-200/40 bg-slate-900/90 px-6 py-5 shadow-2xl">
+            <div className="h-12 w-12 animate-spin rounded-full border-4 border-sky-200/70 border-t-transparent" />
+            <p className="text-lg font-semibold text-sky-50">Generowanie grafiku...</p>
+            <p className="text-xs text-sky-100/70">Operacja może potrwać do 20 sekund.</p>
+          </div>
+        </div>
+      )}
       <div className="mx-auto w-full max-w-[1600px]">
         <div className="flex w-full flex-col gap-6">
         <header className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-rose-200/30 bg-rose-950/60 p-4 shadow-lg">

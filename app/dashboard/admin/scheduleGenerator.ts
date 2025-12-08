@@ -5,9 +5,9 @@ export type BaseRole =
   | "SANITARIUSZ"
   | "SALOWA"
   | "OPIEKUN"
-  | "MAGAZYNIER"
+  | "MAGAZYNIERKA"
   | "SEKRETARKA"
-  | "TERAPEUTA";
+  | "TERAPEUTKA";
 
 export type ExtraRole = "ODDZIALOWA" | "ZABIEGOWA" | "NONE";
 
@@ -391,7 +391,7 @@ function formatDate(year: number, monthIndex: number, day: number) {
 function isEightHourWorker(employee: GeneratorEmployee) {
   if (employee.extraRole === "ODDZIALOWA" || employee.extraRole === "ZABIEGOWA") return true;
   if (employee.fteType === "1_etat_8h") return true;
-  if (employee.baseRole === "SEKRETARKA" || employee.baseRole === "TERAPEUTA" || employee.baseRole === "MAGAZYNIER") {
+  if (employee.baseRole === "SEKRETARKA" || employee.baseRole === "TERAPEUTKA" || employee.baseRole === "MAGAZYNIERKA") {
     return true;
   }
   return false;
@@ -452,7 +452,17 @@ function markShiftExtra(schedule: Record<string, Record<number, string>>, employ
 }
 
 function isFullShift(value: string) {
-  return value === "D" || value === "N" || value === "1";
+  return value === "D" || value === "N";
+}
+
+function isFixedScheduleEmployee(employee: GeneratorEmployee) {
+  const fixedBaseRoles: BaseRole[] = ["MAGAZYNIERKA", "SEKRETARKA", "TERAPEUTKA"];
+  const fixedExtraRoles: ExtraRole[] = ["ODDZIALOWA", "ZABIEGOWA"];
+  return fixedBaseRoles.includes(employee.baseRole) || fixedExtraRoles.includes(employee.extraRole ?? "NONE");
+}
+
+function isNormTracked(employee: GeneratorEmployee) {
+  return !isFixedScheduleEmployee(employee);
 }
 
 function selectCandidate(
@@ -489,8 +499,10 @@ function selectCandidate(
     const previousShift = employeeSchedule[day - 1];
     if (hasDailyRestConflict(previousShift, shiftValue)) return false;
     const worked = workedHoursForEmployee(schedule, candidate.id);
-    const nextHours = worked + getHoursForShift(shiftValue);
-    if (nextHours - targets[candidate.id] > 0.1) return false;
+    if (isNormTracked(candidate)) {
+      const nextHours = worked + getHoursForShift(shiftValue);
+      if (nextHours - targets[candidate.id] > 0.1) return false;
+    }
     if (canAssign && !canAssign(candidate)) return false;
     return true;
   });
@@ -512,7 +524,7 @@ export function generateSchedule(
     ? normToMinutes(mergedConfig.customMonthlyNorm)
     : Math.round(calculateMonthlyNormHours(year, monthIndex, holidays, mergedConfig.baseWorkingDayHours) * 60);
   const targets = employees.reduce<Record<string, number>>((acc, employee) => {
-    acc[employee.id] = getTargetHours(employee.fteType, monthlyNormMinutes);
+    acc[employee.id] = isNormTracked(employee) ? getTargetHours(employee.fteType, monthlyNormMinutes) : 0;
     return acc;
   }, {});
   const { blockedDays, preferDays } = expandRequests(requests);
@@ -551,14 +563,28 @@ export function generateSchedule(
       if (employeeSchedule[day]) return false;
       if (isEightHourWorker(employee) && !isWeekday) return false;
       const worked = workedHoursForEmployee(schedule, employee.id);
-      if (worked + getHoursForShift(value) - targets[employee.id] > 0.1) return false;
+      if (isNormTracked(employee) && worked + getHoursForShift(value) - targets[employee.id] > 0.1) return false;
       if (hasDailyRestConflict(employeeSchedule[day - 1], value)) return false;
       assignShift(employee, value);
       return true;
     };
 
+    headNurseByDay[day] = headNurseByDay[day] ?? null;
+
+    // Pre-plan fixed weekday staff (no norm tracking)
+    if (isWeekday) {
+      employees
+        .filter((emp) => isFixedScheduleEmployee(emp))
+        .forEach((emp) => {
+          if (dayBlocked.has(emp.id) || schedule[emp.id][day]) return;
+          assignShift(emp, "1");
+          if (emp.extraRole === "ODDZIALOWA") {
+            headNurseByDay[day] = emp.id;
+          }
+        });
+    }
+
     // Head nurse placement with substitution logic
-    headNurseByDay[day] = null;
     if (requirement.headNurse > 0) {
       const officialHeads = eightHourWorkers.filter((e) => e.extraRole === "ODDZIALOWA" && !dayBlocked.has(e.id));
       const zabiegowaCandidates = eightHourWorkers.filter((e) => e.extraRole === "ZABIEGOWA" && !dayBlocked.has(e.id));
@@ -576,7 +602,8 @@ export function generateSchedule(
         return false;
       };
 
-      const headPlaced = tryAssignHead(officialHeads) || tryAssignHead(zabiegowaCandidates) || tryAssignHead(regularNurses);
+      const headPlaced =
+        Boolean(headNurseByDay[day]) || tryAssignHead(officialHeads) || tryAssignHead(zabiegowaCandidates) || tryAssignHead(regularNurses);
 
       if (!headPlaced) {
         warnings.push({
@@ -669,9 +696,9 @@ export function generateSchedule(
         }
       };
 
-      assignEightHour("MAGAZYNIER", requirement.magazynier);
+      assignEightHour("MAGAZYNIERKA", requirement.magazynier);
       assignEightHour("SEKRETARKA", requirement.sekretarka);
-      assignEightHour("TERAPEUTA", requirement.terapeuta);
+      assignEightHour("TERAPEUTKA", requirement.terapeuta);
       assignEightHour(
         "PIELEGNIARKA",
         { min: 0, max: requirement.nurses.max },
@@ -689,21 +716,16 @@ export function generateSchedule(
     );
 
     const assignedDayNurses: GeneratorEmployee[] = [];
+    const countedDayNurses = () => assignedDayNurses.filter((n) => n.experienceLevel !== "NOWY").length;
     const regularEightHourCount = employees.filter(
-      (emp) => emp.baseRole === "PIELEGNIARKA" && (emp.extraRole ?? "NONE") === "NONE" && schedule[emp.id]?.[day] === "1"
+      (emp) =>
+        emp.baseRole === "PIELEGNIARKA" &&
+        (emp.extraRole ?? "NONE") === "NONE" &&
+        schedule[emp.id]?.[day] === "1" &&
+        emp.experienceLevel !== "NOWY"
     ).length;
     const maxNurses = Math.max(0, (requirement.nurses.max ?? nurseCandidates.length) - regularEightHourCount);
     const minNurses = Math.max(0, requirement.nurses.min - regularEightHourCount);
-
-    const computeTargetNurses = () => {
-      const newCount = assignedDayNurses.filter((n) => n.experienceLevel === "NOWY").length;
-      const experiencedCount = assignedDayNurses.filter((n) => n.experienceLevel === "DOSWIADCZONY").length;
-      let target = minNurses + newCount;
-      if (newCount > 0 && experiencedCount === 0) {
-        target += 1;
-      }
-      return Math.min(Math.max(target, requirement.nurses.min), maxNurses);
-    };
 
     const selectDayNurse = (predicate?: (emp: GeneratorEmployee) => boolean) =>
       selectCandidate(
@@ -734,42 +756,40 @@ export function generateSchedule(
         }
       );
 
-    while (assignedDayNurses.length < computeTargetNurses()) {
-      const candidate = selectDayNurse();
+    while (countedDayNurses() < minNurses) {
+      const candidate = selectDayNurse((emp) => emp.experienceLevel !== "NOWY");
       if (!candidate) break;
       assignShift(candidate, "D");
       assignedDayNurses.push(candidate);
     }
 
-    const hasNewDay = assignedDayNurses.some((n) => n.experienceLevel === "NOWY");
+    while (countedDayNurses() < maxNurses) {
+      const candidate = selectDayNurse((emp) => emp.experienceLevel !== "NOWY");
+      if (!candidate) break;
+      assignShift(candidate, "D");
+      assignedDayNurses.push(candidate);
+    }
+
     const hasExperiencedDay = assignedDayNurses.some((n) => n.experienceLevel === "DOSWIADCZONY");
-    if (hasNewDay && !hasExperiencedDay) {
-      const experiencedCandidate = selectDayNurse((emp) => emp.experienceLevel === "DOSWIADCZONY");
-      if (experiencedCandidate) {
-        assignShift(experiencedCandidate, "D");
-        assignedDayNurses.push(experiencedCandidate);
-      } else {
-        assignedDayNurses
-          .filter((nurse) => nurse.experienceLevel === "NOWY")
-          .forEach((nurse) => {
-            delete schedule[nurse.id][day];
-          });
-        warnings.push({
-          date: formatDate(year, monthIndex, day),
-          shift: "DAY",
-          dayType,
-          code: "NEW_NURSE_CONSTRAINT",
-          employees: assignedDayNurses.map((n) => employeeNames[n.id]),
-          description: `${formatDate(year, monthIndex, day)} (dzień): nie można przydzielić nowej pielęgniarki bez osoby doświadczonej.`
-        });
+    if (hasExperiencedDay) {
+      while (true) {
+        const candidate = selectDayNurse((emp) => emp.experienceLevel === "NOWY");
+        if (!candidate) break;
+        assignShift(candidate, "D");
+        assignedDayNurses.push(candidate);
       }
     }
 
-    while (assignedDayNurses.length < maxNurses) {
-      const candidate = selectDayNurse();
-      if (!candidate) break;
-      assignShift(candidate, "D");
-      assignedDayNurses.push(candidate);
+    const hasNewDay = assignedDayNurses.some((n) => n.experienceLevel === "NOWY");
+    if (hasNewDay && !hasExperiencedDay) {
+      warnings.push({
+        date: formatDate(year, monthIndex, day),
+        shift: "DAY",
+        dayType,
+        code: "NEW_NURSE_CONSTRAINT",
+        employees: assignedDayNurses.map((n) => employeeNames[n.id]),
+        description: `${formatDate(year, monthIndex, day)} (dzień): nowa pielęgniarka wymaga obecności osoby doświadczonej.`
+      });
     }
 
     const fillRole = (baseRole: BaseRole, req: { min: number; max?: number }, regularOnly?: boolean) => {
@@ -790,11 +810,11 @@ export function generateSchedule(
         );
         if (!candidate) break;
         if (schedule[candidate.id]?.[day]) {
-          assigned += 1;
+          if (candidate.experienceLevel !== "NOWY") assigned += 1;
           break;
         }
         assignShift(candidate, "D");
-        assigned += 1;
+        if (candidate.experienceLevel !== "NOWY") assigned += 1;
       }
       if (assigned < needed) {
         warnings.push({
@@ -821,9 +841,9 @@ export function generateSchedule(
     fillRole("SANITARIUSZ", requirement.sanitariusz);
     fillRole("SALOWA", requirement.salowa);
     fillRole("OPIEKUN", requirement.opiekun);
-    if (requirement.magazynier) fillRole("MAGAZYNIER", requirement.magazynier);
+    if (requirement.magazynier) fillRole("MAGAZYNIERKA", requirement.magazynier);
     if (requirement.sekretarka) fillRole("SEKRETARKA", requirement.sekretarka);
-    if (requirement.terapeuta) fillRole("TERAPEUTA", requirement.terapeuta);
+    if (requirement.terapeuta) fillRole("TERAPEUTKA", requirement.terapeuta);
 
     // Night shift staffing with new nurse and support constraints
     const nightRequirement = mergedConfig.staffRequirements[dayType].NIGHT;
@@ -831,8 +851,7 @@ export function generateSchedule(
 
     const nightNurseCandidates = nightPool.filter((emp) => emp.baseRole === "PIELEGNIARKA");
     const assignedNightNurses: GeneratorEmployee[] = [];
-
-    const computeNightTarget = () => nightRequirement.nurses.max ?? nightRequirement.nurses.min;
+    const countedNightNurses = () => assignedNightNurses.filter((n) => n.experienceLevel !== "NOWY").length;
 
     const selectNightNurse = (predicate?: (emp: GeneratorEmployee) => boolean) =>
       selectCandidate(
@@ -860,8 +879,8 @@ export function generateSchedule(
         }
       );
 
-    while (assignedNightNurses.length < computeNightTarget()) {
-      const candidate = selectNightNurse();
+    while (countedNightNurses() < nightRequirement.nurses.min) {
+      const candidate = selectNightNurse((emp) => emp.experienceLevel !== "NOWY");
       if (!candidate) break;
       assignShift(candidate, "N");
       assignedNightNurses.push(candidate);
@@ -869,26 +888,33 @@ export function generateSchedule(
 
     const nightHasNew = assignedNightNurses.some((n) => n.experienceLevel === "NOWY");
     const nightHasExperienced = assignedNightNurses.some((n) => n.experienceLevel === "DOSWIADCZONY");
-    if (nightHasNew && !nightHasExperienced) {
-      const experiencedCandidate = selectNightNurse((emp) => emp.experienceLevel === "DOSWIADCZONY");
-      if (experiencedCandidate && assignedNightNurses.length < (nightRequirement.nurses.max ?? 2)) {
-        assignShift(experiencedCandidate, "N");
-        assignedNightNurses.push(experiencedCandidate);
-      } else {
-        assignedNightNurses
-          .filter((nurse) => nurse.experienceLevel === "NOWY")
-          .forEach((nurse) => {
-            delete schedule[nurse.id][day];
-          });
-        warnings.push({
-          date: formatDate(year, monthIndex, day),
-          shift: "NIGHT",
-          dayType,
-          code: "NEW_NURSE_CONSTRAINT",
-          employees: assignedNightNurses.map((n) => employeeNames[n.id]),
-          description: `${formatDate(year, monthIndex, day)} (noc): nowa pielęgniarka wymaga obecności osoby doświadczonej i nie można przekroczyć limitu etatów.`
-        });
+    if (countedNightNurses() < (nightRequirement.nurses.max ?? nightRequirement.nurses.min)) {
+      while (countedNightNurses() < (nightRequirement.nurses.max ?? nightRequirement.nurses.min)) {
+        const candidate = selectNightNurse((emp) => emp.experienceLevel !== "NOWY");
+        if (!candidate) break;
+        assignShift(candidate, "N");
+        assignedNightNurses.push(candidate);
       }
+    }
+
+    if (nightHasExperienced) {
+      while (true) {
+        const candidate = selectNightNurse((emp) => emp.experienceLevel === "NOWY");
+        if (!candidate) break;
+        assignShift(candidate, "N");
+        assignedNightNurses.push(candidate);
+      }
+    }
+
+    if (nightHasNew && !nightHasExperienced) {
+      warnings.push({
+        date: formatDate(year, monthIndex, day),
+        shift: "NIGHT",
+        dayType,
+        code: "NEW_NURSE_CONSTRAINT",
+        employees: assignedNightNurses.map((n) => employeeNames[n.id]),
+        description: `${formatDate(year, monthIndex, day)} (noc): nowa pielęgniarka wymaga obecności osoby doświadczonej i nie można przekroczyć limitu etatów.`
+      });
     }
 
     const supportNeeded = nightRequirement.supportAtNight ?? 0;
@@ -965,6 +991,7 @@ export function generateSchedule(
 
   // Short shifts to close gaps
   employees.forEach((employee) => {
+    if (!isNormTracked(employee)) return;
     const target = targets[employee.id];
     const employeeSchedule = schedule[employee.id];
     const workedHours = workedHoursForEmployee(schedule, employee.id);
@@ -992,14 +1019,15 @@ export function generateSchedule(
   employees.forEach((employee) => {
     const employeeSchedule = schedule[employee.id];
     const workedHours = workedHoursForEmployee(schedule, employee.id);
-    const diff = Math.round((workedHours - targets[employee.id]) * 100) / 100;
+    const targetHours = isNormTracked(employee) ? targets[employee.id] : workedHours;
+    const diff = Math.round((workedHours - targetHours) * 100) / 100;
     hoursSummary[employee.id] = {
-      targetHours: targets[employee.id],
+      targetHours,
       workedHours: Math.round(workedHours * 100) / 100,
       difference: diff
     };
 
-    if (diff < 0) {
+    if (isNormTracked(employee) && diff < 0) {
       warnings.push({
         date: "",
         shift: "DAY",
@@ -1067,7 +1095,10 @@ export function generateSchedule(
     ) => {
       segments.forEach((segment) => {
         const count = assignments.filter(
-          (item) => predicate(item.employee) && isActiveInSegment(item.intervals, segment.start, segment.end)
+          (item) =>
+            predicate(item.employee) &&
+            item.employee.experienceLevel !== "NOWY" &&
+            isActiveInSegment(item.intervals, segment.start, segment.end)
         ).length;
         if (count < min) {
           warnings.push({
@@ -1102,7 +1133,10 @@ export function generateSchedule(
     const nightNurses = nightAssignments.filter((item) => item.employee.baseRole === "PIELEGNIARKA");
 
     const selectCoordinator = (list: typeof dayNurses | typeof nightNurses, shiftType: ShiftType) => {
-      const fullShiftCandidates = list.filter((entry) => isFullShift(parseShift(entry.shift).base));
+      const fullShiftCandidates = list.filter(
+        (entry) =>
+          isFullShift(parseShift(entry.shift).base) && (entry.employee.experienceLevel ?? "STANDARD") !== "NOWY"
+      );
       const chooseBy = (predicate: (entry: (typeof list)[number]) => boolean) =>
         fullShiftCandidates
           .filter(predicate)
@@ -1312,7 +1346,7 @@ export function generateSchedule(
     if (requirement.magazynier) {
       checkCoverage(
         "Magazynier",
-        (emp) => emp.baseRole === "MAGAZYNIER",
+        (emp) => emp.baseRole === "MAGAZYNIERKA",
         daySegments,
         dayAssignments,
         requirement.magazynier.min,
@@ -1334,7 +1368,7 @@ export function generateSchedule(
     if (requirement.terapeuta) {
       checkCoverage(
         "Terapeuta",
-        (emp) => emp.baseRole === "TERAPEUTA",
+        (emp) => emp.baseRole === "TERAPEUTKA",
         daySegments,
         dayAssignments,
         requirement.terapeuta.min,
@@ -1393,8 +1427,8 @@ export function generateSchedule(
         oddzialowa: headForDay,
         zabiegowa: dayAssignments.find((item) => item.employee.extraRole === "ZABIEGOWA")?.employee.id ?? null,
         sekretarki: dayAssignments.filter((item) => item.employee.baseRole === "SEKRETARKA").length,
-        terapeuci: dayAssignments.filter((item) => item.employee.baseRole === "TERAPEUTA").length,
-        magazynierzy: dayAssignments.filter((item) => item.employee.baseRole === "MAGAZYNIER").length
+        terapeuci: dayAssignments.filter((item) => item.employee.baseRole === "TERAPEUTKA").length,
+        magazynierzy: dayAssignments.filter((item) => item.employee.baseRole === "MAGAZYNIERKA").length
       },
       nightShift: {
         nurses: {
@@ -1411,8 +1445,8 @@ export function generateSchedule(
         oddzialowa: null,
         zabiegowa: null,
         sekretarki: nightAssignments.filter((item) => item.employee.baseRole === "SEKRETARKA").length,
-        terapeuci: nightAssignments.filter((item) => item.employee.baseRole === "TERAPEUTA").length,
-        magazynierzy: nightAssignments.filter((item) => item.employee.baseRole === "MAGAZYNIER").length
+        terapeuci: nightAssignments.filter((item) => item.employee.baseRole === "TERAPEUTKA").length,
+        magazynierzy: nightAssignments.filter((item) => item.employee.baseRole === "MAGAZYNIERKA").length
       }
     });
   }
