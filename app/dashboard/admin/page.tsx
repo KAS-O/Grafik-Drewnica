@@ -132,6 +132,10 @@ type ShiftTemplate = "D" | "N" | "1" | "hours" | "clear";
 
 type ShiftAction = ShiftTemplate | "o" | "r" | "k";
 
+const MIN_SHORT_SHIFT_MINUTES = 6 * 60;
+const MAX_SHORT_SHIFT_MINUTES = 11 * 60 + 59;
+const MAX_SHORT_SHIFTS_PER_EMPLOYEE = 3;
+
 function deriveShiftTone(value: string): string {
   if (!value) return "bg-slate-900/50 text-sky-100/70";
   if (value.startsWith("N")) return "bg-sky-300/90 text-slate-950";
@@ -159,7 +163,7 @@ function normalizeHours(raw: string): string | null {
   if (pureNumber) {
     const hours = Number.parseInt(pureNumber[0] ?? "", 10);
     if (Number.isNaN(hours) || hours > 23) return null;
-    return `${hours}:00`;
+    return `${String(hours).padStart(2, "0")}:00`;
   }
   const match = trimmed.match(/^(\d{1,2}):(\d{2})$/);
   if (!match) return null;
@@ -170,7 +174,39 @@ function normalizeHours(raw: string): string | null {
   if (Number.isNaN(hours) || hours > 23) return null;
   if (Number.parseInt(minutes, 10) > 59) return null;
 
-  return `${hours}:${minutes}`;
+  return `${String(hours).padStart(2, "0")}:${minutes}`;
+}
+
+function parseTimeToMinutes(value: string): number | null {
+  const normalized = value.trim();
+  const explicit = normalized.match(/^(\d{1,2}):(\d{2})$/);
+  if (explicit) {
+    const hours = Number.parseInt(explicit[1] ?? "0", 10);
+    const minutes = Number.parseInt(explicit[2] ?? "0", 10);
+    if (hours > 23 || minutes > 59) return null;
+    return hours * 60 + minutes;
+  }
+
+  const pureHours = normalized.match(/^(\d{1,2})$/);
+  if (pureHours) {
+    const hours = Number.parseInt(pureHours[1] ?? "0", 10);
+    if (hours > 23) return null;
+    return hours * 60;
+  }
+
+  return null;
+}
+
+function isShortShiftValueLocal(value: string) {
+  const [base] = value.split(" ").filter(Boolean);
+  if (!base || base === "D" || base === "N" || base === "1") return false;
+  const minutes = parseTimeToMinutes(base);
+  if (minutes === null) return false;
+  return minutes >= MIN_SHORT_SHIFT_MINUTES && minutes <= MAX_SHORT_SHIFT_MINUTES;
+}
+
+function countShortShiftsLocal(shifts: Record<number, string>) {
+  return Object.values(shifts || {}).filter((value) => isShortShiftValueLocal(value)).length;
 }
 
 export default function AdminDashboardPage() {
@@ -814,6 +850,30 @@ export default function AdminDashboardPage() {
       const normalized = normalizeHours(hoursValue);
       if (!normalized) {
         setStatus({ type: "error", text: "Podaj poprawny czas w formacie GG:MM (np. 6:10)." });
+        return;
+      }
+      const durationMinutes = parseTimeToMinutes(normalized);
+      if (
+        durationMinutes === null ||
+        durationMinutes < MIN_SHORT_SHIFT_MINUTES ||
+        durationMinutes > MAX_SHORT_SHIFT_MINUTES
+      ) {
+        setStatus({
+          type: "error",
+          text: "Krótkie dyżury muszą mieścić się w przedziale 06:00–11:59."
+        });
+        return;
+      }
+      const employeeShifts = scheduleEntries[employeeId]?.shifts || {};
+      const projectedShortCount =
+        countShortShiftsLocal(employeeShifts) +
+        (isShortShiftValueLocal(`${normalized} ${hoursSegment}`) ? 1 : 0) -
+        (isShortShiftValueLocal(currentValue) ? 1 : 0);
+      if (projectedShortCount > MAX_SHORT_SHIFTS_PER_EMPLOYEE) {
+        setStatus({
+          type: "error",
+          text: "Można zaplanować maksymalnie 3 krótkie dyżury na pracownika."
+        });
         return;
       }
       nextBase = normalized;
