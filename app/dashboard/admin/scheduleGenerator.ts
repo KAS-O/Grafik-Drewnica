@@ -215,12 +215,20 @@ const DEFAULT_STAFF_REQUIREMENTS: StaffRequirements = {
   }
 };
 
+const MINUTES_IN_HOUR = 60;
+const FULL_SHIFT_MINUTES = 12 * MINUTES_IN_HOUR;
+const EIGHT_HOUR_SHIFT_MINUTES = 8 * MINUTES_IN_HOUR;
+const MIN_SHORT_SHIFT_MINUTES = 6 * MINUTES_IN_HOUR;
+const MAX_SHORT_SHIFT_MINUTES = 11 * MINUTES_IN_HOUR + 59;
+
 const DEFAULT_CONFIG = {
-  minRestHoursDaily: 11,
-  minRestHoursWeekly: 35,
-  maxDailyHours: 13,
-  minShiftLength: 6,
-  baseWorkingDayHours: 8,
+  minRestMinutesDaily: 11 * MINUTES_IN_HOUR,
+  minRestMinutesWeekly: 35 * MINUTES_IN_HOUR,
+  maxDailyMinutes: 13 * MINUTES_IN_HOUR,
+  minShiftMinutes: MIN_SHORT_SHIFT_MINUTES,
+  maxShortShiftMinutes: MAX_SHORT_SHIFT_MINUTES,
+  maxShortShiftsPerEmployee: 3,
+  baseWorkingDayMinutes: 8 * MINUTES_IN_HOUR,
   staffRequirements: DEFAULT_STAFF_REQUIREMENTS,
   holidays: POLISH_HOLIDAYS,
   customMonthlyNorm: null as WorkTimeNorm | null
@@ -256,45 +264,58 @@ function shuffleArray<T>(items: T[], random: RandomFn = Math.random): T[] {
 }
 
 type ShiftInterval = { start: number; end: number };
-type ParsedShift = { base: string; extras: Set<string>; segment: ShiftSegment };
+type ParsedShift = { base: string; extras: Set<string>; segment: ShiftSegment; durationMinutes: number | null };
+
+function formatMinutesLabel(totalMinutes: number) {
+  const safe = Math.max(0, Math.round(totalMinutes));
+  const hours = Math.floor(safe / MINUTES_IN_HOUR);
+  const minutes = safe % MINUTES_IN_HOUR;
+  return `${`${hours}`.padStart(2, "0")}:${`${minutes}`.padStart(2, "0")}`;
+}
+
+function parseDurationToMinutes(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const explicitMinutes = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (explicitMinutes) {
+    const hours = Number.parseInt(explicitMinutes[1] ?? "0", 10);
+    const minutes = Number.parseInt(explicitMinutes[2] ?? "0", 10);
+    if (hours > 23 || minutes > 59) return null;
+    return hours * MINUTES_IN_HOUR + minutes;
+  }
+
+  const pureHours = trimmed.match(/^(\d{1,2})(h)?$/i);
+  if (pureHours) {
+    const hours = Number.parseInt(pureHours[1] ?? "0", 10);
+    if (hours > 23) return null;
+    return hours * MINUTES_IN_HOUR;
+  }
+
+  return null;
+}
 
 function getShiftIntervals(value: string): ShiftInterval[] {
-  const { base, segment } = parseShift(value);
+  const { base, segment, durationMinutes } = parseShift(value);
   const normalize = base.trim().toLowerCase();
 
   if (!normalize) return [];
-  if (normalize === "d") return [{ start: 7, end: 19 }];
-  if (normalize === "n") return [{ start: 19, end: 31 }];
-  if (normalize === "1") return [{ start: 7, end: 15 }];
+  if (normalize === "d") return [{ start: 7 * MINUTES_IN_HOUR, end: 19 * MINUTES_IN_HOUR }];
+  if (normalize === "n") return [{ start: 19 * MINUTES_IN_HOUR, end: 31 * MINUTES_IN_HOUR }];
+  if (normalize === "1") return [{ start: 7 * MINUTES_IN_HOUR, end: 15 * MINUTES_IN_HOUR }];
 
-  const numericMatch = normalize.match(/^(\d+)([hp]?)$/);
-  if (numericMatch) {
-    const length = Number.parseInt(numericMatch[1], 10);
-    const suffix = numericMatch[2];
-    const isAfternoon = segment === "PO" || suffix === "p";
-    let start = 7;
-    if (isAfternoon) {
-      start = length >= 10 ? 19 : 13;
-    }
-    return [{ start, end: start + length }];
+  if (durationMinutes === null) return [];
+
+  const lengthHours = durationMinutes / MINUTES_IN_HOUR;
+  let start = 7 * MINUTES_IN_HOUR;
+  if (segment === "PO") {
+    start = lengthHours >= 10 ? 19 * MINUTES_IN_HOUR : 13 * MINUTES_IN_HOUR;
   }
 
-  const durationMatch = normalize.match(/^(\d{1,2})(:(\d{2}))?$/);
-  if (durationMatch) {
-    const hours = Number.parseInt(durationMatch[1], 10);
-    const minutes = durationMatch[3] ? Number.parseInt(durationMatch[3], 10) : 0;
-    const length = hours + minutes / 60;
-    let start = 7;
-    if (segment === "PO") {
-      start = length >= 10 ? 19 : 13;
-    }
-    return [{ start, end: start + length }];
-  }
-
-  return [];
+  return [{ start, end: start + durationMinutes }];
 }
 
-function getHoursForShift(value: string): number {
+function getMinutesForShift(value: string): number {
   return getShiftIntervals(value).reduce((sum, interval) => sum + (interval.end - interval.start), 0);
 }
 
@@ -326,7 +347,7 @@ export function calculateMonthlyNormHours(
   year: number,
   monthIndex: number,
   holidays: Set<string>,
-  baseWorkingDayHours = DEFAULT_CONFIG.baseWorkingDayHours
+  baseWorkingDayMinutes = DEFAULT_CONFIG.baseWorkingDayMinutes
 ) {
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
   let workingDays = 0;
@@ -342,14 +363,15 @@ export function calculateMonthlyNormHours(
     }
   }
 
-  return workingDays * baseWorkingDayHours;
+  const totalMinutes = workingDays * baseWorkingDayMinutes;
+  return totalMinutes / MINUTES_IN_HOUR;
 }
 
 function normToMinutes(norm: WorkTimeNorm) {
   return norm.hours * 60 + norm.minutes;
 }
 
-function getTargetHours(fte: FteType, monthlyNormMinutes: number) {
+function getTargetMinutes(fte: FteType, monthlyNormMinutes: number) {
   const multipliers: Record<FteType, number> = {
     "1_etat_12h": 1,
     "1_etat_8h": 1,
@@ -359,7 +381,7 @@ function getTargetHours(fte: FteType, monthlyNormMinutes: number) {
 
   const multiplier = multipliers[fte] ?? 1;
   const minutes = Math.round(monthlyNormMinutes * multiplier);
-  return Math.round((minutes / 60) * 100) / 100;
+  return minutes;
 }
 
 export function setMonthlyNorm(norm: WorkTimeNorm) {
@@ -388,7 +410,7 @@ function getConsecutiveDayShiftCount(
 }
 
 function toAbsoluteIntervals(day: number, value: string): ShiftInterval[] {
-  const baseDayStart = (day - 1) * 24;
+  const baseDayStart = (day - 1) * 24 * MINUTES_IN_HOUR;
   return getShiftIntervals(value).map((interval) => ({
     start: baseDayStart + interval.start,
     end: baseDayStart + interval.end
@@ -409,26 +431,26 @@ function hasOverlap(intervals: ShiftInterval[]) {
   return false;
 }
 
-function violatesRestBreak(intervals: ShiftInterval[], minRestHours: number) {
+function violatesRestBreak(intervals: ShiftInterval[], minRestMinutes: number) {
   for (let i = 1; i < intervals.length; i++) {
-    if (intervals[i].start - intervals[i - 1].end < minRestHours) return true;
+    if (intervals[i].start - intervals[i - 1].end < minRestMinutes) return true;
   }
   return false;
 }
 
-function exceedsDailyLimit(intervals: ShiftInterval[], maxHours: number) {
+function exceedsDailyLimit(intervals: ShiftInterval[], maxMinutes: number) {
   const checkpoints = Array.from(
     new Set(intervals.flatMap((interval) => [interval.start, interval.end]))
   ).sort((a, b) => a - b);
 
   for (const point of checkpoints) {
-    const windowEnd = point + 24;
+    const windowEnd = point + 24 * MINUTES_IN_HOUR;
     const worked = intervals.reduce((sum, interval) => {
       const start = Math.max(interval.start, point);
       const end = Math.min(interval.end, windowEnd);
       return end > start ? sum + (end - start) : sum;
     }, 0);
-    if (worked - maxHours > 1e-6) return true;
+    if (worked - maxMinutes > 1e-6) return true;
   }
 
   return false;
@@ -440,8 +462,8 @@ function getOccupiedDays(schedule: Record<number, string>, totalDays: number): b
     const day = Number(dayKey);
     toAbsoluteIntervals(day, value).forEach((interval) => {
       for (let offset = 0; offset < totalDays; offset++) {
-        const windowStart = offset * 24;
-        const windowEnd = windowStart + 24;
+        const windowStart = offset * 24 * MINUTES_IN_HOUR;
+        const windowEnd = windowStart + 24 * MINUTES_IN_HOUR;
         if (interval.start < windowEnd && interval.end > windowStart) {
           busy[offset] = true;
         }
@@ -488,8 +510,8 @@ function wouldExceedStaffLimit(
     .filter((item): item is { employee: GeneratorEmployee; shift: string } => Boolean(item.shift))
     .map((item) => ({ ...item, intervals: getShiftIntervals(item.shift) }));
 
-  const daySegments = [{ start: 7, end: 19 }];
-  const nightSegments = [{ start: 19, end: 31 }];
+  const daySegments = [{ start: 7 * MINUTES_IN_HOUR, end: 19 * MINUTES_IN_HOUR }];
+  const nightSegments = [{ start: 19 * MINUTES_IN_HOUR, end: 31 * MINUTES_IN_HOUR }];
   const { DAY: dayReq, NIGHT: nightReq } = requirements[dayType];
 
   const overlapsDay = daySegments.some((segment) => isActiveInSegment(intervals, segment.start, segment.end));
@@ -595,8 +617,8 @@ function canAssignEmployeeToShift(
   );
 
   if (hasOverlap(proposalIntervals)) return false;
-  if (violatesRestBreak(proposalIntervals, config.minRestHoursDaily)) return false;
-  if (exceedsDailyLimit(proposalIntervals, config.maxDailyHours)) return false;
+  if (violatesRestBreak(proposalIntervals, config.minRestMinutesDaily)) return false;
+  if (exceedsDailyLimit(proposalIntervals, config.maxDailyMinutes)) return false;
 
   const simulated = { ...employeeSchedule, [day]: shiftValue };
   if (!ensureWeeklyRest(simulated, totalDays)) return false;
@@ -649,9 +671,9 @@ function isEightHourWorker(employee: GeneratorEmployee) {
   return false;
 }
 
-function workedHoursForEmployee(schedule: Record<string, Record<number, string>>, employeeId: string) {
+function workedMinutesForEmployee(schedule: Record<string, Record<number, string>>, employeeId: string) {
   const employeeSchedule = schedule[employeeId] || {};
-  return Object.values(employeeSchedule).reduce((sum, shift) => sum + getHoursForShift(shift), 0);
+  return Object.values(employeeSchedule).reduce((sum, shift) => sum + getMinutesForShift(shift), 0);
 }
 
 function getEducationScore(level: EducationLevel | undefined) {
@@ -688,7 +710,15 @@ function parseShift(value: string): ParsedShift {
   const [base, ...rest] = value.split(" ").filter(Boolean);
   const extras = new Set(rest.map((item) => item.trim().toUpperCase()));
   const segment: ShiftSegment = extras.has("RA") ? "RA" : extras.has("PO") ? "PO" : "FULL";
-  return { base: base || "", extras, segment };
+
+  const normalizedBase = base?.trim().toUpperCase();
+  const durationMinutes = (() => {
+    if (normalizedBase === "D" || normalizedBase === "N") return FULL_SHIFT_MINUTES;
+    if (normalizedBase === "1") return EIGHT_HOUR_SHIFT_MINUTES;
+    return parseDurationToMinutes(base || "");
+  })();
+
+  return { base: base || "", extras, segment, durationMinutes };
 }
 
 function formatShift(base: string, extras: Set<string>) {
@@ -697,6 +727,19 @@ function formatShift(base: string, extras: Set<string>) {
   if (extras.has("PO")) segments.push("PO");
   const orderedExtras = ["O", "R", "K"].filter((mark) => extras.has(mark));
   return [base, ...segments, ...orderedExtras].filter(Boolean).join(" ").trim();
+}
+
+function isShortShiftValue(value: string, config: typeof DEFAULT_CONFIG) {
+  const parsed = parseShift(value);
+  if (!parsed.base || parsed.base === "D" || parsed.base === "N" || parsed.base === "1") return false;
+  if (parsed.durationMinutes === null) return false;
+  return (
+    parsed.durationMinutes >= config.minShiftMinutes && parsed.durationMinutes <= config.maxShortShiftMinutes
+  );
+}
+
+function countShortShifts(schedule: Record<number, string>, config: typeof DEFAULT_CONFIG) {
+  return Object.values(schedule || {}).filter((value) => isShortShiftValue(value, config)).length;
 }
 
 function markShiftExtra(schedule: Record<string, Record<number, string>>, employeeId: string, day: number, extra: "O" | "R" | "K") {
@@ -729,7 +772,7 @@ function selectCandidate(
   shiftValue: string,
   preferDays: Map<string, Set<number>>,
   dayType: DayType,
-  targets: Record<string, number>,
+  targetMinutes: Record<string, number>,
   employees: GeneratorEmployee[],
   requirements: StaffRequirements,
   config: typeof DEFAULT_CONFIG,
@@ -752,15 +795,15 @@ function selectCandidate(
       const diff = (scoreFn(b) ?? 0) - (scoreFn(a) ?? 0);
       if (diff !== 0) return diff;
     }
-    const hoursA = workedHoursForEmployee(schedule, a.id);
-    const hoursB = workedHoursForEmployee(schedule, b.id);
-    if (hoursA !== hoursB) return hoursA - hoursB;
+    const minutesA = workedMinutesForEmployee(schedule, a.id);
+    const minutesB = workedMinutesForEmployee(schedule, b.id);
+    if (minutesA !== minutesB) return minutesA - minutesB;
     if (shiftValue === "D") {
       const streakA = getConsecutiveDayShiftCount(schedule, a.id, day);
       const streakB = getConsecutiveDayShiftCount(schedule, b.id, day);
       if (streakA !== streakB) return streakA - streakB;
     }
-    if (Math.abs(hoursA - hoursB) < 0.1) {
+    if (Math.abs(minutesA - minutesB) < 1) {
       return random() - 0.5;
     }
     return a.lastName.localeCompare(b.lastName, "pl");
@@ -784,10 +827,10 @@ function selectCandidate(
     ) {
       return false;
     }
-    const worked = workedHoursForEmployee(schedule, candidate.id);
+    const worked = workedMinutesForEmployee(schedule, candidate.id);
     if (isNormTracked(candidate)) {
-      const nextHours = worked + getHoursForShift(shiftValue);
-      if (nextHours - targets[candidate.id] > 0.1) return false;
+      const nextMinutes = worked + getMinutesForShift(shiftValue);
+      if (nextMinutes - targetMinutes[candidate.id] > 0) return false;
     }
     if (canAssign && !canAssign(candidate)) return false;
     return true;
@@ -810,9 +853,9 @@ function generateScheduleOnce(
   const holidays = mergedConfig.holidays;
   const monthlyNormMinutes = mergedConfig.customMonthlyNorm
     ? normToMinutes(mergedConfig.customMonthlyNorm)
-    : Math.round(calculateMonthlyNormHours(year, monthIndex, holidays, mergedConfig.baseWorkingDayHours) * 60);
-  const targets = employees.reduce<Record<string, number>>((acc, employee) => {
-    acc[employee.id] = isNormTracked(employee) ? getTargetHours(employee.fteType, monthlyNormMinutes) : 0;
+    : Math.round(calculateMonthlyNormHours(year, monthIndex, holidays, mergedConfig.baseWorkingDayMinutes) * MINUTES_IN_HOUR);
+  const targetMinutes = employees.reduce<Record<string, number>>((acc, employee) => {
+    acc[employee.id] = isNormTracked(employee) ? getTargetMinutes(employee.fteType, monthlyNormMinutes) : 0;
     return acc;
   }, {});
   const { blockedDays, preferDays } = expandRequests(requests);
@@ -848,8 +891,8 @@ function generateScheduleOnce(
     const tryAssign = (employee: GeneratorEmployee, value: string) => {
       if (dayBlocked.has(employee.id)) return false;
       if (isEightHourWorker(employee) && !isWeekday) return false;
-      const worked = workedHoursForEmployee(schedule, employee.id);
-      if (isNormTracked(employee) && worked + getHoursForShift(value) - targets[employee.id] > 0.1) return false;
+      const worked = workedMinutesForEmployee(schedule, employee.id);
+      if (isNormTracked(employee) && worked + getMinutesForShift(value) - targetMinutes[employee.id] > 0) return false;
       if (
         !canAssignEmployeeToShift(
           schedule,
@@ -934,7 +977,7 @@ function generateScheduleOnce(
           "1",
           preferDays,
           dayType,
-          targets,
+          targetMinutes,
           employees,
           mergedConfig.staffRequirements,
           mergedConfig,
@@ -983,8 +1026,8 @@ function generateScheduleOnce(
 
         for (const candidate of candidates) {
           if (assigned >= req.min) break;
-          const worked = workedHoursForEmployee(schedule, candidate.id);
-          if (worked + 8 - targets[candidate.id] > 0.1) continue;
+          const worked = workedMinutesForEmployee(schedule, candidate.id);
+          if (worked + EIGHT_HOUR_SHIFT_MINUTES - targetMinutes[candidate.id] > 0) continue;
           if (tryAssign(candidate, "1")) {
             assigned += 1;
           }
@@ -1051,7 +1094,7 @@ function generateScheduleOnce(
         "D",
         preferDays,
         dayType,
-        targets,
+        targetMinutes,
         employees,
         mergedConfig.staffRequirements,
         mergedConfig,
@@ -1126,7 +1169,7 @@ function generateScheduleOnce(
           "D",
           preferDays,
           dayType,
-          targets,
+          targetMinutes,
           employees,
           mergedConfig.staffRequirements,
           mergedConfig,
@@ -1191,7 +1234,7 @@ function generateScheduleOnce(
         "N",
         preferDays,
         dayType,
-        targets,
+        targetMinutes,
         employees,
         mergedConfig.staffRequirements,
         mergedConfig,
@@ -1266,7 +1309,7 @@ function generateScheduleOnce(
         "N",
         preferDays,
         dayType,
-        targets,
+        targetMinutes,
         employees,
         mergedConfig.staffRequirements,
         mergedConfig,
@@ -1333,13 +1376,13 @@ function generateScheduleOnce(
   const sanitariusze = employees.filter((employee) => employee.baseRole === "SANITARIUSZ");
   sanitariusze.forEach((employee) => {
     if (!isNormTracked(employee)) return;
-    let workedHours = workedHoursForEmployee(schedule, employee.id);
-    let deficit = targets[employee.id] - workedHours;
-    if (deficit < mergedConfig.minShiftLength) return;
+    let workedMinutes = workedMinutesForEmployee(schedule, employee.id);
+    let deficit = targetMinutes[employee.id] - workedMinutes;
+    if (deficit < mergedConfig.minShiftMinutes) return;
 
     const candidateDays = shuffleArray(Array.from({ length: daysInMonth }, (_, idx) => idx + 1), random);
     for (const day of candidateDays) {
-      if (deficit < mergedConfig.minShiftLength) break;
+      if (deficit < mergedConfig.minShiftMinutes) break;
       const employeeSchedule = schedule[employee.id];
       if (employeeSchedule[day]) continue;
       const dayType = getDayType(year, monthIndex, day, holidays);
@@ -1369,35 +1412,40 @@ function generateScheduleOnce(
       }).length;
       if (daySanitCount >= (dayRequirement.sanitariusz.max ?? Infinity)) continue;
 
-      const projected = workedHours + getHoursForShift("D");
-      if (projected - targets[employee.id] > 0.1) continue;
+      const projected = workedMinutes + getMinutesForShift("D");
+      if (projected - targetMinutes[employee.id] > 0) continue;
       employeeSchedule[day] = "D";
-      workedHours = projected;
-      deficit = targets[employee.id] - workedHours;
+      workedMinutes = projected;
+      deficit = targetMinutes[employee.id] - workedMinutes;
     }
   });
 
   // Short shifts to close gaps
   employees.forEach((employee) => {
     if (!isNormTracked(employee)) return;
-    const target = targets[employee.id];
+    const target = targetMinutes[employee.id];
     const employeeSchedule = schedule[employee.id];
-    let workedHours = workedHoursForEmployee(schedule, employee.id);
-    let deficit = target - workedHours;
-    if (deficit < mergedConfig.minShiftLength) return;
+    let workedMinutes = workedMinutesForEmployee(schedule, employee.id);
+    let deficit = target - workedMinutes;
+    let shortShiftsUsed = countShortShifts(employeeSchedule, mergedConfig);
+
+    if (deficit < mergedConfig.minShiftMinutes) return;
+    if (shortShiftsUsed >= mergedConfig.maxShortShiftsPerEmployee) return;
 
     const dayCandidates = shuffleArray(Array.from({ length: daysInMonth }, (_, idx) => idx + 1), random);
     for (const day of dayCandidates) {
-      if (deficit < mergedConfig.minShiftLength) break;
+      if (deficit < mergedConfig.minShiftMinutes) break;
+      if (shortShiftsUsed >= mergedConfig.maxShortShiftsPerEmployee) break;
       if (employeeSchedule[day]) continue;
       const dayType = getDayType(year, monthIndex, day, holidays);
       if (isEightHourWorker(employee) && dayType !== "WEEKDAY") continue;
       if (blockedDays.get(employee.id)?.has(day)) continue;
 
-      const length = Math.min(deficit, 11);
-      if (length < mergedConfig.minShiftLength) break;
+      const lengthMinutes = Math.min(deficit, mergedConfig.maxShortShiftMinutes);
+      if (lengthMinutes < mergedConfig.minShiftMinutes) break;
 
-      const options = [`${length}h RA`, `${length}h PO`];
+      const formattedLength = formatMinutesLabel(lengthMinutes);
+      const options = [`${formattedLength} RA`, `${formattedLength} PO`];
 
       const chosen = options.find((val) =>
         canAssignEmployeeToShift(
@@ -1416,8 +1464,9 @@ function generateScheduleOnce(
       if (!chosen) continue;
 
       employeeSchedule[day] = chosen;
-      workedHours = workedHoursForEmployee(schedule, employee.id);
-      deficit = target - workedHours;
+      shortShiftsUsed += 1;
+      workedMinutes = workedMinutesForEmployee(schedule, employee.id);
+      deficit = target - workedMinutes;
     }
   });
 
@@ -1426,23 +1475,28 @@ function generateScheduleOnce(
 
   employees.forEach((employee) => {
     const employeeSchedule = schedule[employee.id];
-    const workedHours = workedHoursForEmployee(schedule, employee.id);
-    const targetHours = isNormTracked(employee) ? targets[employee.id] : workedHours;
-    const diff = Math.round((workedHours - targetHours) * 100) / 100;
+    const workedMinutes = workedMinutesForEmployee(schedule, employee.id);
+    const targetMinutesForEmployee = isNormTracked(employee) ? targetMinutes[employee.id] : workedMinutes;
+    const diffMinutes = workedMinutes - targetMinutesForEmployee;
+    const workedHours = Math.round((workedMinutes / MINUTES_IN_HOUR) * 100) / 100;
+    const targetHours = Math.round((targetMinutesForEmployee / MINUTES_IN_HOUR) * 100) / 100;
+    const diff = Math.round((diffMinutes / MINUTES_IN_HOUR) * 100) / 100;
     hoursSummary[employee.id] = {
       targetHours,
-      workedHours: Math.round(workedHours * 100) / 100,
+      workedHours,
       difference: diff
     };
 
-    if (isNormTracked(employee) && diff < 0 && !isAlertSuppressed(employee)) {
+    if (isNormTracked(employee) && diffMinutes < 0 && !isAlertSuppressed(employee)) {
       warnings.push({
         date: "",
         shift: "DAY",
         dayType: "WEEKDAY",
         code: "HOURS_UNDER_NORM",
         employees: [employeeNames[employee.id]],
-        description: `Pracownik ${employeeNames[employee.id]} ma niedobór godzin względem normy (${Math.abs(diff)}h).`
+        description: `Pracownik ${employeeNames[employee.id]} ma niedobór godzin względem normy (${Math.abs(diff).toFixed(
+          2
+        )}h).`
       });
     }
 
